@@ -1,17 +1,15 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
-import { SkeletonUtils } from 'three-stdlib'; // CRITICAL: Prevents 2nd-trial animation freezes
+import { SkeletonUtils } from 'three-stdlib';
 
-// Preload assets
 useGLTF.preload("/models/penguin.glb");
 useGLTF.preload("/models/seabed.glb");
 useGLTF.preload("/models/fish.glb");
 useGLTF.preload("/models/squid.glb");
 useGLTF.preload("/models/plastic.glb");
 
-// --- EXTRA ENGINE UTILITY: XR BINDER ---
 function XRManager({ session }) {
   const { gl } = useThree();
   useEffect(() => {
@@ -24,12 +22,10 @@ function XRManager({ session }) {
   return null;
 }
 
-// --- 1. PLAYER PENGUIN COMPONENT ---
-function PlayerPenguin() {
+// 1. PENGUIN (Never unmounts, uses visibility toggle to protect skeleton)
+function PlayerPenguin({ visible }) {
   const group = useRef();
   const { scene, animations } = useGLTF("/models/penguin.glb");
-  
-  // FIX: Safely clones the skeleton so it never freezes on the 2nd trial
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
   const { camera } = useThree();
@@ -38,13 +34,13 @@ function PlayerPenguin() {
     if (animations && animations.length > 0) {
       mixer.clipAction(animations[0]).reset().play();
     }
-    return () => mixer.stopAllAction();
   }, [mixer, animations]);
 
   useFrame((_, delta) => {
+    if (!visible) return;
     mixer.update(delta); 
-    
     if (!group.current) return;
+    
     const targetPosition = new THREE.Vector3(0, -0.25, -1.3);
     targetPosition.applyMatrix4(camera.matrixWorld);
     group.current.position.lerp(targetPosition, delta * 5.5);
@@ -54,7 +50,7 @@ function PlayerPenguin() {
   });
 
   return (
-    <group ref={group}>
+    <group ref={group} visible={visible}>
       <group rotation={[0, -Math.PI / 2 + Math.PI, 0]}>
         <primitive object={clonedScene} scale={0.15} />
       </group>
@@ -62,10 +58,9 @@ function PlayerPenguin() {
   );
 }
 
-// --- 2. ENVIRONMENT COMPONENT ---
-function Environment() {
+// 2. ENVIRONMENT (Never unmounts)
+function Environment({ visible }) {
   const { scene, animations } = useGLTF("/models/seabed.glb");
-  
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
 
@@ -86,13 +81,14 @@ function Environment() {
         }
       });
     }
-    return () => mixer.stopAllAction();
   }, [clonedScene, animations, mixer]);
 
-  useFrame((_, delta) => mixer.update(delta));
+  useFrame((_, delta) => {
+    if (visible) mixer.update(delta);
+  });
 
   return (
-    <group>
+    <group visible={visible}>
       <ambientLight intensity={0.9} color="#bae6fd" />
       <directionalLight position={[2, 8, 2]} intensity={1.5} color="#e0f2fe" />
       <pointLight position={[0, 2, 0]} intensity={0.5} color="#38bdf8" />
@@ -101,11 +97,12 @@ function Environment() {
   );
 }
 
-// --- 3. SMART SPAWNER COMPONENT ---
-function Spawner({ setItems }) {
+// 3. SPAWNER
+function Spawner({ onSpawn, isActive }) {
   const { camera } = useThree();
 
   useEffect(() => {
+    if (!isActive) return;
     const interval = setInterval(() => {
       const types = ['fish', 'squid', 'plastic'];
       const itemType = types[Math.floor(Math.random() * types.length)];
@@ -121,57 +118,41 @@ function Spawner({ setItems }) {
       const spawnZ = camera.position.z + (forward.z * spawnDistance) + (forward.x * lateralOffset);
       const spawnY = camera.position.y + (Math.random() - 0.5) * 1.0; 
 
-      setItems((prev) => [
-        ...prev,
-        {
-          id: Date.now() + Math.random(),
-          type: itemType,
-          pos: [spawnX, spawnY, spawnZ],
-          // SLOWER SPEED APPLIED
-          speed: 0.3 + Math.random() * 0.3 
-        }
-      ]);
+      onSpawn({
+        id: Date.now() + Math.random(),
+        type: itemType,
+        pos: [spawnX, spawnY, spawnZ],
+        speed: 0.3 + Math.random() * 0.3 // Slower speed
+      });
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [camera, setItems]);
+  }, [camera, onSpawn, isActive]);
 
   return null;
 }
 
-// --- 4. GAME OBJECT RENDERERS ---
-function AnimatedItem({ modelPath, position, scale }) {
-  const group = useRef();
+// 4. GAME OBJECT RENDERERS
+function AnimatedItem({ modelPath, scale }) {
   const { scene, animations } = useGLTF(modelPath);
-  
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
 
   useEffect(() => {
-    let action;
     if (animations && animations.length > 0) {
-      action = mixer.clipAction(animations[0]);
-      action.reset().play().setEffectiveTimeScale(1.5); 
+      mixer.clipAction(animations[0]).reset().play().setEffectiveTimeScale(1.5); 
     }
-    return () => {
-      if (action) action.stop();
-      mixer.stopAllAction();
-    };
+    return () => mixer.stopAllAction();
   }, [mixer, animations]);
 
   useFrame((_, delta) => mixer.update(delta));
-
-  return (
-    <group ref={group} position={position}>
-      <primitive object={clonedScene} scale={scale} />
-    </group>
-  );
+  return <primitive object={clonedScene} scale={scale} />;
 }
 
-function StaticItem({ modelPath, position, scale }) {
-  const group = useRef();
+function StaticItem({ modelPath, scale }) {
   const { scene } = useGLTF(modelPath);
   const clonedScene = useMemo(() => scene.clone(), [scene]);
+  const group = useRef();
   
   useFrame((_, delta) => {
     if (group.current) {
@@ -181,35 +162,62 @@ function StaticItem({ modelPath, position, scale }) {
   });
 
   return (
-    <group ref={group} position={position}>
+    <group ref={group}>
       <primitive object={clonedScene} scale={scale} />
     </group>
   );
 }
 
-// REQUESTED SIZES APPLIED
-function GameItem({ type, position }) {
-  if (type === 'fish') return <AnimatedItem modelPath="/models/fish.glb" position={position} scale={0.0015} />;
-  if (type === 'squid') return <AnimatedItem modelPath="/models/squid.glb" position={position} scale={0.5} />;
-  if (type === 'plastic') return <StaticItem modelPath="/models/plastic.glb" position={position} scale={0.015} />;
-  return null;
+// INDIVIDUAL ITEM LOGIC (Prevents origin piling & tracks beak perfectly)
+function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
+  const group = useRef();
+  const { camera } = useThree();
+
+  useFrame((_, delta) => {
+    if (!group.current) return;
+
+    // Item targets the PENGUIN, not the phone
+    const penguinPos = new THREE.Vector3(0, -0.25, -1.3).applyMatrix4(camera.matrixWorld);
+    const currentPos = group.current.position;
+    const targetPos = new THREE.Vector3(penguinPos.x, currentPos.y, penguinPos.z);
+    
+    const direction = new THREE.Vector3().subVectors(targetPos, currentPos);
+    
+    if (direction.lengthSq() > 0.001) {
+      direction.normalize();
+      currentPos.addScaledVector(direction, speed * delta);
+    }
+
+    // Collision Check (Touching the Penguin)
+    if (currentPos.distanceTo(penguinPos) < 0.45) {
+      onCollect(id, type);
+    } 
+    // Safety Net: If it missed the penguin and hits the camera, delete it to prevent origin piling
+    else if (currentPos.distanceTo(camera.position) < 0.5) {
+      onMiss(id);
+    }
+  });
+
+  return (
+    <group ref={group} position={startPos}>
+      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.0015} />}
+      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.5} />}
+      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.015} />}
+    </group>
+  );
 }
 
-// --- 5. MAIN APP CONTAINER ---
+// 5. MAIN APP CONTAINER
 export default function App() {
   const [gameState, setGameState] = useState('MENU'); 
   const [items, setItems] = useState([]);
   
-  // HEALTH BAR STATE
   const [health, setHealth] = useState(50); // Max 100
   const [fishCount, setFishCount] = useState(0);
   const [squidCount, setSquidCount] = useState(0);
-  
-  // 1 MINUTE TIMER
   const [timeLeft, setTimeLeft] = useState(60); 
   const [xrSession, setXrSession] = useState(null);
 
-  // AUDIO REFS
   const ambienceAudio = useRef(null);
   const chirpAudio = useRef(null);
   const collectAudio = useRef(null);
@@ -231,7 +239,6 @@ export default function App() {
     };
   }, []);
 
-  // Timer Logic & Game Over Audio
   useEffect(() => {
     let timer;
     if (gameState === 'PLAYING' && timeLeft > 0 && health > 0) {
@@ -245,9 +252,7 @@ export default function App() {
         chirpAudio.current.play().catch(e => console.log("Audio play blocked:", e));
       }
 
-      if (xrSession) {
-        xrSession.end(); 
-      }
+      if (xrSession) xrSession.end(); 
     }
     return () => clearInterval(timer);
   }, [gameState, timeLeft, health, xrSession]);
@@ -271,10 +276,9 @@ export default function App() {
       setItems([]);
       setGameState('PLAYING');
 
-      // Start Ambient Audio
       if (ambienceAudio.current) {
         ambienceAudio.current.currentTime = 0;
-        ambienceAudio.current.play().catch(e => console.log("Audio play blocked:", e));
+        ambienceAudio.current.play().catch(e => console.log("Audio blocked:", e));
       }
 
       session.addEventListener('end', () => {
@@ -288,8 +292,13 @@ export default function App() {
     }
   };
 
-  // Safe State Updater for Collections
-  const handleCollect = (type) => {
+  const handleSpawn = useCallback((newItem) => {
+    setItems((prev) => [...prev, newItem]);
+  }, []);
+
+  const handleCollect = useCallback((id, type) => {
+    setItems((prev) => prev.filter(item => item.id !== id));
+
     if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
       window.navigator.vibrate(40);
     }
@@ -299,65 +308,24 @@ export default function App() {
     }
 
     if (type === 'fish') {
-      setHealth((h) => Math.min(100, h + 10)); // +1x
+      setHealth((h) => Math.min(100, h + 10)); 
       setFishCount((f) => f + 1);
     } else if (type === 'squid') {
-      setHealth((h) => Math.min(100, h + 20)); // +2x
+      setHealth((h) => Math.min(100, h + 20)); 
       setSquidCount((s) => s + 1);
     } else if (type === 'plastic') {
-      setHealth((h) => Math.max(0, h - 20));   // -2x
+      setHealth((h) => Math.max(0, h - 20));   
     }
-  };
+  }, []);
 
-  function GameLoop({ onCollect }) {
-    const { camera } = useThree();
-    
-    useFrame((_, delta) => {
-      setItems((prevItems) => {
-        let collectedType = null;
-
-        const nextItems = prevItems.map((item) => {
-          const currentPos = new THREE.Vector3(...item.pos);
-          const targetPos = new THREE.Vector3(camera.position.x, currentPos.y, camera.position.z);
-          
-          // FIX: Prevents NaN math collapse (blinking at origin)
-          const direction = new THREE.Vector3().subVectors(targetPos, currentPos);
-          if (direction.lengthSq() > 0.001) {
-            direction.normalize();
-            currentPos.addScaledVector(direction, item.speed * delta);
-          }
-          
-          return { ...item, pos: [currentPos.x, currentPos.y, currentPos.z] };
-        }).filter((item) => {
-          const itemVec = new THREE.Vector3(...item.pos);
-          
-          // FIX: Tighter hit detection accurately placed at the penguin's beak
-          const penguinPos = new THREE.Vector3(0, -0.25, -1.3).applyMatrix4(camera.matrixWorld);
-          const distToPenguin = penguinPos.distanceTo(itemVec);
-
-          if (distToPenguin < 0.45) { 
-            collectedType = item.type;
-            return false; // Safely delete item from scene
-          }
-          
-          return itemVec.distanceTo(camera.position) < 8; 
-        });
-
-        // Safely triggers the UI outside of the ThreeJS rendering frame
-        if (collectedType) {
-          setTimeout(() => onCollect(collectedType), 0);
-        }
-
-        return nextItems;
-      });
-    });
-    return null;
-  }
+  const handleMiss = useCallback((id) => {
+    // Safely deletes the item if it misses the penguin to stop origin piling
+    setItems((prev) => prev.filter(item => item.id !== id));
+  }, []);
 
   return (
     <div id="xr-overlay" style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: gameState === 'PLAYING' ? 'transparent' : '#0b1d3a' }}>
       
-      {/* GAMEPLAY HUD */}
       {gameState === 'PLAYING' && (
         <>
           <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10, background: 'rgba(15, 23, 42, 0.75)', padding: '12px', borderRadius: '8px', color: '#fff', fontFamily: 'sans-serif' }}>
@@ -371,7 +339,6 @@ export default function App() {
               0:{timeLeft.toString().padStart(2, '0')}
             </div>
             
-            {/* HEALTH BAR SYSTEM */}
             <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px', textAlign: 'right' }}>ENERGY</div>
             <div style={{ width: '120px', height: '14px', background: 'rgba(0,0,0,0.6)', borderRadius: '10px', overflow: 'hidden', border: '2px solid rgba(255,255,255,0.2)' }}>
               <div style={{ 
@@ -385,7 +352,6 @@ export default function App() {
         </>
       )}
 
-      {/* MAIN MENU */}
       {gameState === 'MENU' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '36px', marginBottom: '8px', letterSpacing: '2px' }}>ICY AR</h1>
@@ -402,7 +368,6 @@ export default function App() {
         </div>
       )}
 
-      {/* GAME OVER SCREEN */}
       {gameState === 'GAMEOVER' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '42px', marginBottom: '8px', color: health <= 0 ? '#ef4444' : '#f8fafc' }}>
@@ -427,17 +392,24 @@ export default function App() {
 
       <Canvas camera={{ position: [0, 1.5, 0], fov: 70 }} gl={{ alpha: true }}>
         <XRManager session={xrSession} />
-        <Environment />
-        {gameState === 'PLAYING' && (
-          <>
-            <PlayerPenguin />
-            <Spawner setItems={setItems} />
-            <GameLoop onCollect={handleCollect} />
-            {items.map((item) => (
-              <GameItem key={item.id} type={item.type} position={item.pos} />
-            ))}
-          </>
-        )}
+        
+        {/* Core elements are permanently mounted to protect skeletons */}
+        <Environment visible={gameState === 'PLAYING'} />
+        <PlayerPenguin visible={gameState === 'PLAYING'} />
+        
+        <Spawner onSpawn={handleSpawn} isActive={gameState === 'PLAYING'} />
+        
+        {items.map((item) => (
+          <GameItem 
+            key={item.id} 
+            id={item.id}
+            type={item.type} 
+            startPos={item.pos} 
+            speed={item.speed}
+            onCollect={handleCollect}
+            onMiss={handleMiss}
+          />
+        ))}
       </Canvas>
     </div>
   );
