@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
-import { SkeletonUtils } from 'three-stdlib'; // CRITICAL: Safely clones model skeletons
+import { SkeletonUtils } from 'three-stdlib'; // CRITICAL: Safely clones animation skeletons
 
-// Preload assets to avoid mid-game stuttering
+// Preload assets
 useGLTF.preload("/models/penguin.glb");
 useGLTF.preload("/models/seabed.glb");
 useGLTF.preload("/models/fish.glb");
@@ -28,8 +28,6 @@ function XRManager({ session }) {
 function PlayerPenguin() {
   const group = useRef();
   const { scene, animations } = useGLTF("/models/penguin.glb");
-  
-  // Manual Mixer guarantees animations run regardless of XR rendering contexts
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
   const { camera } = useThree();
 
@@ -40,7 +38,7 @@ function PlayerPenguin() {
   }, [mixer, animations]);
 
   useFrame((_, delta) => {
-    mixer.update(delta); // Force animation forward every frame
+    mixer.update(delta); 
     
     if (!group.current) return;
     const targetPosition = new THREE.Vector3(0, -0.25, -1.3);
@@ -66,18 +64,15 @@ function Environment() {
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
   useEffect(() => {
-    // Force play any background animations (like seaweed swaying)
     if (animations && animations.length > 0) {
       animations.forEach((clip) => mixer.clipAction(clip).reset().play());
     }
-
     if (scene) {
       scene.traverse((child) => {
         if (child.isMesh) {
           child.castShadow = true;
           child.receiveShadow = true;
           const meshName = child.name.toLowerCase();
-          
           if (meshName.includes('sand') || meshName.includes('floor') || meshName.includes('ground')) {
             child.material.transparent = true;
             child.material.opacity = 0.15; 
@@ -125,7 +120,8 @@ function Spawner({ setItems }) {
           id: Date.now() + Math.random(),
           type: itemType,
           pos: [spawnX, spawnY, spawnZ],
-          speed: 1.1 + Math.random() * 0.5
+          // SLOWER SPEED APPLIED HERE
+          speed: 0.5 + Math.random() * 0.4 
         }
       ]);
     }, 2000);
@@ -137,20 +133,24 @@ function Spawner({ setItems }) {
 }
 
 // --- 4. GAME OBJECT RENDERERS ---
-
 function AnimatedItem({ modelPath, position, scale }) {
   const group = useRef();
   const { scene, animations } = useGLTF(modelPath);
   
-  // CRITICAL FIX: SkeletonUtils safely clones the animation bones
+  // SkeletonUtils allows cloned meshes to keep their animation bones
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
 
   useEffect(() => {
+    let action;
     if (animations && animations.length > 0) {
-      const action = mixer.clipAction(animations[0]);
-      action.reset().play().setEffectiveTimeScale(1.5);
+      action = mixer.clipAction(animations[0]);
+      action.reset().play().setEffectiveTimeScale(1.5); 
     }
+    return () => {
+      if (action) action.stop();
+      mixer.stopAllAction();
+    };
   }, [mixer, animations]);
 
   useFrame((_, delta) => mixer.update(delta));
@@ -181,6 +181,7 @@ function StaticItem({ modelPath, position, scale }) {
   );
 }
 
+// REQUESTED SIZES APPLIED
 function GameItem({ type, position }) {
   if (type === 'fish') return <AnimatedItem modelPath="/models/fish.glb" position={position} scale={0.0015} />;
   if (type === 'squid') return <AnimatedItem modelPath="/models/squid.glb" position={position} scale={0.5} />;
@@ -192,24 +193,54 @@ function GameItem({ type, position }) {
 export default function App() {
   const [gameState, setGameState] = useState('MENU'); 
   const [items, setItems] = useState([]);
-  const [score, setScore] = useState(0);
+  
+  // HEALTH BAR STATE
+  const [health, setHealth] = useState(50); // Max 100
   const [fishCount, setFishCount] = useState(0);
   const [squidCount, setSquidCount] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(30);
+  
+  // 1 MINUTE TIMER
+  const [timeLeft, setTimeLeft] = useState(60); 
   const [xrSession, setXrSession] = useState(null);
 
+  // AUDIO REFS
+  const ambienceAudio = useRef(null);
+  const chirpAudio = useRef(null);
+
+  useEffect(() => {
+    ambienceAudio.current = new Audio("/audios/antarctic_ambience.mp3");
+    ambienceAudio.current.loop = true;
+    ambienceAudio.current.volume = 0.4;
+
+    chirpAudio.current = new Audio("/audios/baby_penguin.mp3");
+    chirpAudio.current.volume = 1.0;
+
+    return () => {
+      if (ambienceAudio.current) ambienceAudio.current.pause();
+      if (chirpAudio.current) chirpAudio.current.pause();
+    };
+  }, []);
+
+  // Timer Logic & Game Over Audio
   useEffect(() => {
     let timer;
-    if (gameState === 'PLAYING' && timeLeft > 0) {
+    if (gameState === 'PLAYING' && timeLeft > 0 && health > 0) {
       timer = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
-    } else if (timeLeft === 0 && gameState === 'PLAYING') {
+    } else if ((timeLeft === 0 || health <= 0) && gameState === 'PLAYING') {
       setGameState('GAMEOVER');
+      
+      if (ambienceAudio.current) ambienceAudio.current.pause();
+      if (chirpAudio.current) {
+        chirpAudio.current.currentTime = 0;
+        chirpAudio.current.play().catch(e => console.log("Audio play blocked:", e));
+      }
+
       if (xrSession) {
-        xrSession.end();
+        xrSession.end(); 
       }
     }
     return () => clearInterval(timer);
-  }, [gameState, timeLeft, xrSession]);
+  }, [gameState, timeLeft, health, xrSession]);
 
   const initiateXRSession = async () => {
     if (!navigator.xr) {
@@ -223,16 +254,23 @@ export default function App() {
       });
       
       setXrSession(session);
-      setScore(0);
+      setHealth(50);
       setFishCount(0);
       setSquidCount(0);
-      setTimeLeft(30);
+      setTimeLeft(60); // Reset to 60s
       setItems([]);
       setGameState('PLAYING');
 
+      // Start Ambient Audio
+      if (ambienceAudio.current) {
+        ambienceAudio.current.currentTime = 0;
+        ambienceAudio.current.play().catch(e => console.log("Audio play blocked:", e));
+      }
+
       session.addEventListener('end', () => {
-        setGameState(timeLeft === 0 ? 'GAMEOVER' : 'MENU');
+        setGameState('MENU');
         setXrSession(null);
+        if (ambienceAudio.current) ambienceAudio.current.pause();
       });
     } catch (e) {
       console.error("Failed to start AR Session:", e);
@@ -256,20 +294,25 @@ export default function App() {
           })
           .filter((item) => {
             const itemVec = new THREE.Vector3(...item.pos);
-            const dist = camera.position.distanceTo(itemVec);
+            
+            // CRITICAL FIX: Measure distance to the PENGUIN, not the Camera!
+            const penguinPos = new THREE.Vector3(0, -0.25, -1.3).applyMatrix4(camera.matrixWorld);
+            const distToPenguin = penguinPos.distanceTo(itemVec);
 
-            if (dist < 1.4) { 
+            // Tighter collision radius (0.4 instead of 1.4) so they actually touch the beak
+            if (distToPenguin < 0.4) { 
               if (item.type === 'fish') {
-                setScore((s) => s + 10); 
+                setHealth((h) => Math.min(100, h + 10)); // +1x
                 setFishCount((f) => f + 1);
               } else if (item.type === 'squid') {
-                setScore((s) => s + 25);
+                setHealth((h) => Math.min(100, h + 20)); // +2x
                 setSquidCount((s) => s + 1);
               } else if (item.type === 'plastic') {
-                setScore((s) => Math.max(0, s - 15)); 
+                setHealth((h) => Math.max(0, h - 20));   // -2x
               }
-              return false; 
+              return false; // Remove item from screen
             }
+            // Cleanup items that float too far away
             return itemVec.distanceTo(camera.position) < 8; 
           });
       });
@@ -280,6 +323,7 @@ export default function App() {
   return (
     <div id="xr-overlay" style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: gameState === 'PLAYING' ? 'transparent' : '#0b1d3a' }}>
       
+      {/* GAMEPLAY HUD */}
       {gameState === 'PLAYING' && (
         <>
           <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10, background: 'rgba(15, 23, 42, 0.75)', padding: '12px', borderRadius: '8px', color: '#fff', fontFamily: 'sans-serif' }}>
@@ -289,16 +333,25 @@ export default function App() {
           </div>
 
           <div style={{ position: 'absolute', top: '20px', right: '20px', zIndex: 10, background: 'rgba(15, 23, 42, 0.75)', padding: '12px 24px', borderRadius: '8px', textAlign: 'center', fontFamily: 'sans-serif' }}>
-            <div style={{ color: timeLeft <= 10 ? '#ef4444' : '#fff', fontSize: '24px', fontWeight: 'bold', marginBottom: '4px' }}>
+            <div style={{ color: timeLeft <= 10 ? '#ef4444' : '#fff', fontSize: '24px', fontWeight: 'bold', marginBottom: '8px' }}>
               0:{timeLeft.toString().padStart(2, '0')}
             </div>
-            <div style={{ color: '#38bdf8', fontSize: '16px', fontWeight: 'bold' }}>
-              Score: {score}
+            
+            {/* NEW HEALTH BAR SYSTEM */}
+            <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px', textAlign: 'right' }}>ENERGY</div>
+            <div style={{ width: '120px', height: '14px', background: 'rgba(0,0,0,0.6)', borderRadius: '10px', overflow: 'hidden', border: '2px solid rgba(255,255,255,0.2)' }}>
+              <div style={{ 
+                width: `${health}%`, 
+                height: '100%', 
+                background: health > 30 ? '#4ade80' : '#ef4444', // Turns red if low
+                transition: 'width 0.3s ease-out, background-color 0.3s ease'
+              }} />
             </div>
           </div>
         </>
       )}
 
+      {/* MAIN MENU */}
       {gameState === 'MENU' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '36px', marginBottom: '8px', letterSpacing: '2px' }}>ICY AR</h1>
@@ -306,7 +359,7 @@ export default function App() {
           
           <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '15px 25px', borderRadius: '8px', marginBottom: '30px', fontSize: '14px', color: '#e2e8f0', maxWidth: '300px', lineHeight: '1.6', border: '1px solid rgba(255,255,255,0.1)' }}>
             <strong>How to Play:</strong><br />
-            Move your phone up, down, left, and right to steer the penguin. Swim into items to collect points while avoiding red plastic hazards! You have 30 seconds.
+            Move your phone up, down, left, and right to steer the penguin. Catch fish and squid to fill your Energy Bar! Avoid red plastic hazards! You have 60 seconds.
           </div>
 
           <button onClick={initiateXRSession} style={{ background: '#2563eb', border: 'none', color: '#fff', padding: '14px 36px', fontSize: '16px', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' }}>
@@ -315,13 +368,16 @@ export default function App() {
         </div>
       )}
 
+      {/* GAME OVER SCREEN */}
       {gameState === 'GAMEOVER' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
-          <h1 style={{ fontSize: '42px', marginBottom: '8px', color: '#f8fafc' }}>TIME'S UP!</h1>
+          <h1 style={{ fontSize: '42px', marginBottom: '8px', color: health <= 0 ? '#ef4444' : '#f8fafc' }}>
+            {health <= 0 ? "OUT OF ENERGY!" : "TIME'S UP!"}
+          </h1>
           
           <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '24px 40px', borderRadius: '12px', margin: '20px 0 30px 0', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <div style={{ fontSize: '16px', color: '#94a3b8', marginBottom: '8px' }}>FINAL SCORE</div>
-            <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#38bdf8', marginBottom: '16px' }}>{score}</div>
+            <div style={{ fontSize: '16px', color: '#94a3b8', marginBottom: '8px' }}>FINAL BATTERY LEVEL</div>
+            <div style={{ fontSize: '48px', fontWeight: 'bold', color: health > 30 ? '#4ade80' : '#ef4444', marginBottom: '16px' }}>{health}%</div>
             
             <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', fontSize: '14px' }}>
               <span style={{ color: '#4ade80' }}>Fish: {fishCount}</span>
