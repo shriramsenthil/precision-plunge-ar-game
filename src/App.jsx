@@ -1,12 +1,11 @@
-import "./App.css";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { XR, ARButton } from "@react-three/xr";
-import { useGLTF, useAnimations, Html } from "@react-three/drei";
+import { useGLTF, useAnimations } from "@react-three/drei";
 import { useRef, useEffect, useState, Suspense } from "react";
 import * as THREE from "three";
 
 // ==========================================
-// 1. ENVIRONMENT: WATER ROOF & SAND FLOOR
+// 1. HARDENED ENVIRONMENT
 // ==========================================
 function Environment() {
   return (
@@ -28,7 +27,7 @@ function Environment() {
 }
 
 // ==========================================
-// 2. PLAYER: CAMERA-TRACKED PENGUIN
+// 2. SAFE CAMERA-LINKED PENGUIN
 // ==========================================
 function PlayerPenguin() {
   const group = useRef();
@@ -37,18 +36,18 @@ function PlayerPenguin() {
   const { camera } = useThree();
 
   useEffect(() => {
-    // Safety check in case animations are missing from the model
     if (names && names.length > 0 && actions[names[0]]) {
-      const activeAction = actions[names[0]];
-      activeAction.reset().fadeIn(0.25).play();
-      activeAction.setEffectiveTimeScale(1.5); 
+      actions[names[0]].reset().fadeIn(0.25).play().setEffectiveTimeScale(1.5);
     }
   }, [actions, names]);
 
-  useFrame((state, delta) => {
-    if (!group.current) return;
+  useFrame((_, delta) => {
+    if (!group.current || !camera) return;
+    
+    // Safely pull world matrices without using internal state stores
     const targetPosition = new THREE.Vector3(0, -0.2, -0.4);
     targetPosition.applyMatrix4(camera.matrixWorld);
+    
     group.current.position.lerp(targetPosition, delta * 10);
     group.current.quaternion.slerp(camera.quaternion, delta * 10);
   });
@@ -61,7 +60,7 @@ function PlayerPenguin() {
 }
 
 // ==========================================
-// 3. SPAWNER: INCOMING FISH
+// 3. INTERNAL ISOLATED SPAWNER
 // ==========================================
 function Spawner({ onScore }) {
   const [items, setItems] = useState([]);
@@ -69,6 +68,7 @@ function Spawner({ onScore }) {
   const fishModel = useGLTF("/models/fish.glb");
 
   useEffect(() => {
+    if (!camera) return;
     const interval = setInterval(() => {
       setItems((prev) => [
         ...prev,
@@ -85,16 +85,17 @@ function Spawner({ onScore }) {
     return () => clearInterval(interval);
   }, [camera]);
 
-  useFrame((state, delta) => {
+  useFrame((_, delta) => {
+    if (!camera) return;
     setItems((prevItems) => {
       let activeItems = [];
       prevItems.forEach((item) => {
-        item.pos[2] += delta * 1.5; 
+        item.pos[2] += delta * 1.5;
         const itemVec = new THREE.Vector3(...item.pos);
         const distance = camera.position.distanceTo(itemVec);
 
         if (distance < 0.4) {
-          onScore(); 
+          onScore();
         } else if (item.pos[2] < camera.position.z + 1) {
           activeItems.push(item);
         }
@@ -113,10 +114,9 @@ function Spawner({ onScore }) {
 }
 
 // ==========================================
-// 4. MAIN GAME CONTROLLER
+// 4. MAIN CORE RENDERER
 // ==========================================
 export default function App() {
-  const [isARActive, setIsARActive] = useState(false);
   const [score, setScore] = useState(0);
 
   const handleScore = () => {
@@ -127,60 +127,54 @@ export default function App() {
   };
 
   return (
-    <div style={{ width: "100vw", height: "100dvh", position: "relative", backgroundColor: "#111" }}>
+    <div style={{ width: "100vw", height: "100vh", position: "fixed", top: 0, left: 0, backgroundColor: "#111111", overflow: "hidden" }}>
       
-      {/* ALWAYS VISIBLE DIAGNOSTIC UI */}
-      <div style={{ position: "absolute", zIndex: 9999, width: "100%", padding: "20px", pointerEvents: "none" }}>
-        <h2 style={{ color: "white", margin: 0, textShadow: "2px 2px 4px black" }}>Score: {score}</h2>
-        <p style={{ color: isARActive ? "#4ade80" : "#f87171", fontWeight: "bold", textShadow: "1px 1px 2px black" }}>
-          {isARActive ? "AR Session Active" : "Waiting for AR / PC Mode"}
-        </p>
+      {/* HUD Panel - Completely isolated from Canvas context */}
+      <div style={{ position: "absolute", top: 0, left: 0, zIndex: 999, padding: "24px", pointerEvents: "none" }}>
+        <h1 style={{ color: "#ffffff", margin: 0, fontFamily: "sans-serif", fontSize: "28px", textShadow: "2px 2px 8px rgba(0,0,0,0.8)" }}>
+          Precision Plunge
+        </h1>
+        <div style={{ marginTop: "10px", background: "rgba(0,0,0,0.6)", padding: "8px 16px", borderRadius: "8px", display: "inline-block" }}>
+          <p style={{ color: "#00ffcc", margin: 0, fontWeight: "bold", fontFamily: "sans-serif", fontSize: "20px" }}>
+            Score: {score}
+          </p>
+        </div>
       </div>
 
       <ARButton
-        sessionInit={{ 
+        sessionInit={{
           requiredFeatures: ["local-floor"],
-          optionalFeatures: ["hit-test", "dom-overlay"],
+          optionalFeatures: ["dom-overlay"],
           domOverlay: { root: document.body }
         }}
-        style={{ 
-          position: 'absolute', 
-          bottom: '40px', 
-          left: '50%', 
-          transform: 'translateX(-50%)', 
-          zIndex: 10000, 
-          display: 'block',
-          padding: '16px 32px',
-          backgroundColor: 'white',
-          color: 'black',
-          fontWeight: 'bold',
-          borderRadius: '30px',
-          border: 'none',
-          boxShadow: '0px 4px 10px rgba(0,0,0,0.5)'
+        style={{
+          position: "absolute",
+          bottom: "40px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 9999,
+          padding: "18px 36px",
+          fontSize: "18px",
+          fontWeight: "bold",
+          letterSpacing: "1px",
+          backgroundColor: "#ffffff",
+          color: "#000000",
+          border: "none",
+          borderRadius: "50px",
+          cursor: "pointer",
+          boxShadow: "0px 10px 30px rgba(0,0,0,0.5)"
         }}
       />
 
-      <Canvas style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
-        <XR onSessionStart={() => setIsARActive(true)} onSessionEnd={() => setIsARActive(false)}>
-          
-          {/* THE 404 CATCHER: If models fail to load, this prevents the black screen */}
-          <Suspense fallback={
-            <Html center>
-              <div style={{ background: "rgba(255,0,0,0.9)", color: "white", padding: "20px", borderRadius: "10px", width: "300px", textAlign: "center" }}>
-                <h3 style={{ margin: "0 0 10px 0" }}>⚠️ Loading Stuck</h3>
-                <p style={{ margin: 0 }}>If this stays on your screen, your <b>penguin.glb</b> or <b>fish.glb</b> files are missing from the <b>public/models</b> folder!</p>
-              </div>
-            </Html>
-          }>
-            <ambientLight intensity={2.0} />
-            <directionalLight position={[0, 5, 0]} intensity={1.5} color="#e0f2fe" />
-            
-            {/* Render unconditionally so you can see them before AR starts */}
+      <Canvas style={{ width: "100%", height: "100%" }} camera={{ position: [0, 0, 2], fov: 75 }}>
+        <XR>
+          <ambientLight intensity={1.5} />
+          <directionalLight position={[0, 8, 2]} intensity={1.5} />
+          <Suspense fallback={null}>
             <Environment />
             <PlayerPenguin />
             <Spawner onScore={handleScore} />
           </Suspense>
-
         </XR>
       </Canvas>
     </div>
