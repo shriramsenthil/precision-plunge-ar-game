@@ -22,7 +22,7 @@ function XRManager({ session }) {
   return null;
 }
 
-// 1. PENGUIN (Never unmounts, uses visibility toggle to protect skeleton)
+// 1. PENGUIN (Fixed 2nd Trial Freeze)
 function PlayerPenguin({ visible }) {
   const group = useRef();
   const { scene, animations } = useGLTF("/models/penguin.glb");
@@ -30,11 +30,15 @@ function PlayerPenguin({ visible }) {
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
   const { camera } = useThree();
 
+  // FIX: Animation now explicitly restarts whenever the game becomes visible
   useEffect(() => {
-    if (animations && animations.length > 0) {
-      mixer.clipAction(animations[0]).reset().play();
+    if (visible && animations && animations.length > 0) {
+      const action = mixer.clipAction(animations[0]);
+      action.reset().play();
+    } else {
+      mixer.stopAllAction();
     }
-  }, [mixer, animations]);
+  }, [visible, mixer, animations]);
 
   useFrame((_, delta) => {
     if (!visible) return;
@@ -58,16 +62,19 @@ function PlayerPenguin({ visible }) {
   );
 }
 
-// 2. ENVIRONMENT (Never unmounts)
+// 2. ENVIRONMENT
 function Environment({ visible }) {
   const { scene, animations } = useGLTF("/models/seabed.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
 
   useEffect(() => {
-    if (animations && animations.length > 0) {
+    if (visible && animations && animations.length > 0) {
       animations.forEach((clip) => mixer.clipAction(clip).reset().play());
+    } else {
+      mixer.stopAllAction();
     }
+
     if (clonedScene) {
       clonedScene.traverse((child) => {
         if (child.isMesh) {
@@ -81,7 +88,7 @@ function Environment({ visible }) {
         }
       });
     }
-  }, [clonedScene, animations, mixer]);
+  }, [visible, clonedScene, animations, mixer]);
 
   useFrame((_, delta) => {
     if (visible) mixer.update(delta);
@@ -97,7 +104,7 @@ function Environment({ visible }) {
   );
 }
 
-// 3. SPAWNER
+// 3. SPAWNER (Endless Runner Logic)
 function Spawner({ onSpawn, isActive }) {
   const { camera } = useThree();
 
@@ -107,22 +114,23 @@ function Spawner({ onSpawn, isActive }) {
       const types = ['fish', 'squid', 'plastic'];
       const itemType = types[Math.floor(Math.random() * types.length)];
       
+      // Spawn items 5-7 meters directly in front of the camera, spread left/right/up/down
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
       forward.y = 0; 
       forward.normalize();
 
-      const spawnDistance = 4.5 + Math.random() * 2.0;
-      const lateralOffset = (Math.random() - 0.5) * 3.5;
+      const spawnDistance = 5.0 + Math.random() * 2.0; 
+      const lateralOffset = (Math.random() - 0.5) * 3.0;
 
       const spawnX = camera.position.x + (forward.x * spawnDistance) - (forward.z * lateralOffset);
       const spawnZ = camera.position.z + (forward.z * spawnDistance) + (forward.x * lateralOffset);
-      const spawnY = camera.position.y + (Math.random() - 0.5) * 1.0; 
+      const spawnY = camera.position.y - 0.25 + (Math.random() - 0.5) * 1.5; 
 
       onSpawn({
         id: Date.now() + Math.random(),
         type: itemType,
         pos: [spawnX, spawnY, spawnZ],
-        speed: 0.3 + Math.random() * 0.3 // Slower speed
+        speed: 0.8 + Math.random() * 0.4 // Slower, manageable speed
       });
     }, 2000);
 
@@ -168,7 +176,7 @@ function StaticItem({ modelPath, scale }) {
   );
 }
 
-// INDIVIDUAL ITEM LOGIC (Prevents origin piling & tracks beak perfectly)
+// INDIVIDUAL ITEM LOGIC (Straight-line movement to prevent piling)
 function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
   const group = useRef();
   const { camera } = useThree();
@@ -176,24 +184,21 @@ function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
   useFrame((_, delta) => {
     if (!group.current) return;
 
-    // Item targets the PENGUIN, not the phone
-    const penguinPos = new THREE.Vector3(0, -0.25, -1.3).applyMatrix4(camera.matrixWorld);
-    const currentPos = group.current.position;
-    const targetPos = new THREE.Vector3(penguinPos.x, currentPos.y, penguinPos.z);
-    
-    const direction = new THREE.Vector3().subVectors(targetPos, currentPos);
-    
-    if (direction.lengthSq() > 0.001) {
-      direction.normalize();
-      currentPos.addScaledVector(direction, speed * delta);
-    }
+    // 1. Move purely in a straight line towards the camera Z plane
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(camera.quaternion);
+    forward.y = 0; 
+    forward.normalize();
+    group.current.position.addScaledVector(forward, speed * delta);
 
-    // Collision Check (Touching the Penguin)
-    if (currentPos.distanceTo(penguinPos) < 0.45) {
+    // 2. Collision Check (Is it touching the penguin?)
+    const penguinPos = new THREE.Vector3(0, -0.25, -1.3).applyMatrix4(camera.matrixWorld);
+    const distToPenguin = group.current.position.distanceTo(penguinPos);
+
+    if (distToPenguin < 0.5) {
       onCollect(id, type);
     } 
-    // Safety Net: If it missed the penguin and hits the camera, delete it to prevent origin piling
-    else if (currentPos.distanceTo(camera.position) < 0.5) {
+    // 3. Safety Delete (If it misses the penguin and goes behind the camera)
+    else if (group.current.position.distanceTo(camera.position) < 0.5 || group.current.position.distanceTo(penguinPos) > 10) {
       onMiss(id);
     }
   });
@@ -262,6 +267,15 @@ export default function App() {
       setGameState('PLAYING');
       return;
     }
+
+    // AUDIO WARMUP FIX: Force browser to unlock the audio context on click
+    if (collectAudio.current) {
+      collectAudio.current.play().then(() => {
+        collectAudio.current.pause();
+        collectAudio.current.currentTime = 0;
+      }).catch(e => console.log("Warmup blocked:", e));
+    }
+
     try {
       const session = await navigator.xr.requestSession('immersive-ar', {
         requiredFeatures: ['local-floor', 'dom-overlay'],
@@ -296,31 +310,36 @@ export default function App() {
     setItems((prev) => [...prev, newItem]);
   }, []);
 
+  // Uses a timeout to safely update state outside of the React Three Fiber render loop
   const handleCollect = useCallback((id, type) => {
-    setItems((prev) => prev.filter(item => item.id !== id));
+    setTimeout(() => {
+      setItems((prev) => prev.filter(item => item.id !== id));
 
-    if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
-      window.navigator.vibrate(40);
-    }
-    if (collectAudio.current) {
-      collectAudio.current.currentTime = 0;
-      collectAudio.current.play().catch(e => console.log("Audio blocked:", e));
-    }
+      if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
+        window.navigator.vibrate(40);
+      }
+      
+      if (collectAudio.current) {
+        collectAudio.current.currentTime = 0;
+        collectAudio.current.play().catch(e => console.log("Audio blocked:", e));
+      }
 
-    if (type === 'fish') {
-      setHealth((h) => Math.min(100, h + 10)); 
-      setFishCount((f) => f + 1);
-    } else if (type === 'squid') {
-      setHealth((h) => Math.min(100, h + 20)); 
-      setSquidCount((s) => s + 1);
-    } else if (type === 'plastic') {
-      setHealth((h) => Math.max(0, h - 20));   
-    }
+      if (type === 'fish') {
+        setHealth((h) => Math.min(100, h + 10)); 
+        setFishCount((f) => f + 1);
+      } else if (type === 'squid') {
+        setHealth((h) => Math.min(100, h + 20)); 
+        setSquidCount((s) => s + 1);
+      } else if (type === 'plastic') {
+        setHealth((h) => Math.max(0, h - 20));   
+      }
+    }, 0);
   }, []);
 
   const handleMiss = useCallback((id) => {
-    // Safely deletes the item if it misses the penguin to stop origin piling
-    setItems((prev) => prev.filter(item => item.id !== id));
+    setTimeout(() => {
+      setItems((prev) => prev.filter(item => item.id !== id));
+    }, 0);
   }, []);
 
   return (
@@ -393,7 +412,6 @@ export default function App() {
       <Canvas camera={{ position: [0, 1.5, 0], fov: 70 }} gl={{ alpha: true }}>
         <XRManager session={xrSession} />
         
-        {/* Core elements are permanently mounted to protect skeletons */}
         <Environment visible={gameState === 'PLAYING'} />
         <PlayerPenguin visible={gameState === 'PLAYING'} />
         
