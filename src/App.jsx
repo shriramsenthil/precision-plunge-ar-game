@@ -82,7 +82,6 @@ function Environment() {
         position={[0, -1.4, -1.5]} 
         scale={[1.2, 1.2, 1.2]} 
       />
-      {/* The transparent roof has been removed as requested */}
     </group>
   );
 }
@@ -161,12 +160,11 @@ function StaticItem({ modelPath, position, scale }) {
   );
 }
 
-// Main switch for spawned items
+// Main switch for spawned items (UPDATED SIZES AND SQUID)
 function GameItem({ type, position }) {
-  // Adjust these scales based on how big your downloaded models actually are
-  if (type === 'fish') return <AnimatedItem modelPath="/models/fish.glb" position={position} scale={0.2} />;
-  if (type === 'squid') return <AnimatedItem modelPath="/models/squid.glb" position={position} scale={0.3} />;
-  if (type === 'plastic') return <StaticItem modelPath="/models/plastic.glb" position={position} scale={0.25} />;
+  if (type === 'fish') return <AnimatedItem modelPath="/models/fish.glb" position={position} scale={0.0015} />;
+  if (type === 'squid') return <AnimatedItem modelPath="/models/squid.glb" position={position} scale={0.5} />;
+  if (type === 'plastic') return <StaticItem modelPath="/models/plastic.glb" position={position} scale={0.015} />;
   return null;
 }
 
@@ -194,6 +192,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [gameState, timeLeft, xrSession]);
 
+  // UPDATED XR SESSION BINDING (WITH DOM-OVERLAY)
   const initiateXRSession = async () => {
     if (!navigator.xr) {
       setGameState('PLAYING');
@@ -201,11 +200,11 @@ export default function App() {
     }
     try {
       const session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['local-floor']
+        requiredFeatures: ['local-floor', 'dom-overlay'],
+        domOverlay: { root: document.getElementById('xr-overlay') || document.body }
       });
-      setXrSession(session);
       
-      // Reset stats on new game
+      setXrSession(session);
       setScore(0);
       setFishCount(0);
       setSquidCount(0);
@@ -243,7 +242,7 @@ export default function App() {
 
             if (dist < 1.4) { 
               if (item.type === 'fish') {
-                setScore((s) => s + 10); // Boosted score values for more fun
+                setScore((s) => s + 10); 
                 setFishCount((f) => f + 1);
               } else if (item.type === 'squid') {
                 setScore((s) => s + 25);
@@ -261,7 +260,7 @@ export default function App() {
   }
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: gameState === 'PLAYING' ? 'transparent' : '#0b1d3a' }}>
+    <div id="xr-overlay" style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: gameState === 'PLAYING' ? 'transparent' : '#0b1d3a' }}>
       
       {/* GAMEPLAY HUD */}
       {gameState === 'PLAYING' && (
@@ -272,7 +271,6 @@ export default function App() {
             <div style={{ color: '#c084fc' }}>Squid: {squidCount}</div>
           </div>
 
-          {/* Combined Score & Timer Container */}
           <div style={{ position: 'absolute', top: '20px', right: '20px', zIndex: 10, background: 'rgba(15, 23, 42, 0.75)', padding: '12px 24px', borderRadius: '8px', textAlign: 'center', fontFamily: 'sans-serif' }}>
             <div style={{ color: timeLeft <= 10 ? '#ef4444' : '#fff', fontSize: '24px', fontWeight: 'bold', marginBottom: '4px' }}>
               0:{timeLeft.toString().padStart(2, '0')}
@@ -325,7 +323,6 @@ export default function App() {
       <Canvas camera={{ position: [0, 1.5, 0], fov: 70 }} gl={{ alpha: true }}>
         <XRManager session={xrSession} />
         <Environment />
-        
         {gameState === 'PLAYING' && (
           <>
             <PlayerPenguin />
