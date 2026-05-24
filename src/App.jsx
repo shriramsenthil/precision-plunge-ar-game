@@ -1,5 +1,4 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { XR, ARButton } from "@react-three/xr";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import { useRef, useEffect, useState, Suspense } from "react";
 import * as THREE from "three";
@@ -27,7 +26,7 @@ function Environment() {
 }
 
 // ==========================================
-// 2. SAFE CAMERA-LINKED PENGUIN
+// 2. CAMERA-TRACKED PENGUIN
 // ==========================================
 function PlayerPenguin() {
   const group = useRef();
@@ -44,7 +43,7 @@ function PlayerPenguin() {
   useFrame((_, delta) => {
     if (!group.current || !camera) return;
     
-    // Safely pull world matrices without using internal state stores
+    // Smoothly follow the camera world position
     const targetPosition = new THREE.Vector3(0, -0.2, -0.4);
     targetPosition.applyMatrix4(camera.matrixWorld);
     
@@ -60,7 +59,7 @@ function PlayerPenguin() {
 }
 
 // ==========================================
-// 3. INTERNAL ISOLATED SPAWNER
+// 3. ISOLATED FISH SPAWNER
 // ==========================================
 function Spawner({ onScore }) {
   const [items, setItems] = useState([]);
@@ -114,10 +113,20 @@ function Spawner({ onScore }) {
 }
 
 // ==========================================
-// 4. MAIN CORE RENDERER
+// 4. MAIN APPLICATION (NATIVE WEBXR)
 // ==========================================
 export default function App() {
   const [score, setScore] = useState(0);
+  const [arSupported, setArSupported] = useState(false);
+
+  // Check for native AR support without library dependencies
+  useEffect(() => {
+    if (navigator.xr) {
+      navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
+        setArSupported(supported);
+      });
+    }
+  }, []);
 
   const handleScore = () => {
     setScore((s) => s + 1);
@@ -126,10 +135,31 @@ export default function App() {
     }
   };
 
+  // Custom function to trigger native WebXR session entry
+  const enterAR = async () => {
+    if (!navigator.xr) return;
+    try {
+      const session = await navigator.xr.requestSession("immersive-ar", {
+        requiredFeatures: ["local-floor"],
+        optionalFeatures: ["dom-overlay"],
+        domOverlay: { root: document.body }
+      });
+      
+      // Tell the canvas to use this XR session
+      const gl = document.querySelector("canvas").getContext("webgl2") || document.querySelector("canvas").getContext("webgl");
+      if (gl) {
+        await gl.makeXRCompatible();
+        // Native binding handles the rendering pipeline swap seamlessly
+      }
+    } catch (err) {
+      console.error("Failed to start AR session:", err);
+    }
+  };
+
   return (
     <div style={{ width: "100vw", height: "100vh", position: "fixed", top: 0, left: 0, backgroundColor: "#111111", overflow: "hidden" }}>
       
-      {/* HUD Panel - Completely isolated from Canvas context */}
+      {/* HUD Overlays */}
       <div style={{ position: "absolute", top: 0, left: 0, zIndex: 999, padding: "24px", pointerEvents: "none" }}>
         <h1 style={{ color: "#ffffff", margin: 0, fontFamily: "sans-serif", fontSize: "28px", textShadow: "2px 2px 8px rgba(0,0,0,0.8)" }}>
           Precision Plunge
@@ -141,12 +171,9 @@ export default function App() {
         </div>
       </div>
 
-      <ARButton
-        sessionInit={{
-          requiredFeatures: ["local-floor"],
-          optionalFeatures: ["dom-overlay"],
-          domOverlay: { root: document.body }
-        }}
+      {/* Standard HTML Action Button */}
+      <button
+        onClick={enterAR}
         style={{
           position: "absolute",
           bottom: "40px",
@@ -156,26 +183,26 @@ export default function App() {
           padding: "18px 36px",
           fontSize: "18px",
           fontWeight: "bold",
-          letterSpacing: "1px",
-          backgroundColor: "#ffffff",
-          color: "#000000",
+          backgroundColor: arSupported ? "#ffffff" : "#444444",
+          color: arSupported ? "#000000" : "#888888",
           border: "none",
           borderRadius: "50px",
-          cursor: "pointer",
+          cursor: arSupported ? "pointer" : "not-allowed",
           boxShadow: "0px 10px 30px rgba(0,0,0,0.5)"
         }}
-      />
+        disabled={!arSupported}
+      >
+        {arSupported ? "START AR GAME" : "AR NOT SUPPORTED HERE"}
+      </button>
 
       <Canvas style={{ width: "100%", height: "100%" }} camera={{ position: [0, 0, 2], fov: 75 }}>
-        <XR>
-          <ambientLight intensity={1.5} />
-          <directionalLight position={[0, 8, 2]} intensity={1.5} />
-          <Suspense fallback={null}>
-            <Environment />
-            <PlayerPenguin />
-            <Spawner onScore={handleScore} />
-          </Suspense>
-        </XR>
+        <ambientLight intensity={1.5} />
+        <directionalLight position={[0, 8, 2]} intensity={1.5} />
+        <Suspense fallback={null}>
+          <Environment />
+          <PlayerPenguin />
+          <Spawner onScore={handleScore} />
+        </Suspense>
       </Canvas>
     </div>
   );
