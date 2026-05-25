@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useAnimations, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
@@ -24,19 +24,108 @@ function cloneModel(scene) {
   return SkeletonUtils.clone(scene);
 }
 
+function createGameItem(camera) {
+  const rand = Math.random();
+
+  let type = "fish";
+
+  if (rand < 0.55) {
+    type = "fish";
+  } else if (rand < 0.85) {
+    type = "krill";
+  } else {
+    type = "plastic";
+  }
+
+  const forward = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+
+  camera.getWorldDirection(forward);
+  right.crossVectors(forward, up).normalize();
+
+  const directionOptions = ["front", "left", "right", "top", "bottom"];
+  const directionType =
+    directionOptions[Math.floor(Math.random() * directionOptions.length)];
+
+  let direction = new THREE.Vector3();
+
+  if (directionType === "front") {
+    direction.copy(forward);
+  }
+
+  if (directionType === "left") {
+    direction.copy(forward).multiplyScalar(0.5).add(right.clone().multiplyScalar(-1));
+  }
+
+  if (directionType === "right") {
+    direction.copy(forward).multiplyScalar(0.5).add(right.clone().multiplyScalar(1));
+  }
+
+  if (directionType === "top") {
+    direction.copy(forward).multiplyScalar(0.65).add(new THREE.Vector3(0, 1, 0));
+  }
+
+  if (directionType === "bottom") {
+    direction.copy(forward).multiplyScalar(0.65).add(new THREE.Vector3(0, -1, 0));
+  }
+
+  direction.x += (Math.random() - 0.5) * 0.35;
+  direction.y += (Math.random() - 0.5) * 0.25;
+  direction.z += (Math.random() - 0.5) * 0.35;
+  direction.normalize();
+
+  const distance = 6.5 + Math.random() * 2.2;
+  const position = camera.position.clone().add(direction.multiplyScalar(distance));
+
+  return {
+    id: `${Date.now()}-${Math.random()}`,
+    type,
+    position: [position.x, position.y, position.z],
+    speed: type === "plastic" ? 0.85 : 0.95,
+    spin: 0.7 + Math.random() * 0.8,
+  };
+}
+
+function CameraRig({ viewRef }) {
+  const { camera } = useThree();
+
+  useFrame((_, delta) => {
+    camera.position.set(0, 0, 0);
+
+    camera.rotation.y = THREE.MathUtils.lerp(
+      camera.rotation.y,
+      viewRef.current.yaw,
+      delta * 4
+    );
+
+    camera.rotation.x = THREE.MathUtils.lerp(
+      camera.rotation.x,
+      viewRef.current.pitch,
+      delta * 4
+    );
+
+    camera.rotation.z = 0;
+  });
+
+  return null;
+}
+
 function UnderwaterBubbles() {
   const pointsRef = useRef();
 
   const particles = useMemo(() => {
     const temp = [];
-    for (let i = 0; i < 110; i++) {
+
+    for (let i = 0; i < 180; i++) {
       temp.push({
-        x: (Math.random() - 0.5) * 9,
-        y: Math.random() * 7 - 3,
-        z: Math.random() * -10,
-        speed: 0.25 + Math.random() * 0.55,
+        x: (Math.random() - 0.5) * 14,
+        y: Math.random() * 8 - 4,
+        z: -Math.random() * 12 - 1,
+        speed: 0.22 + Math.random() * 0.55,
       });
     }
+
     return temp;
   }, []);
 
@@ -52,10 +141,10 @@ function UnderwaterBubbles() {
     for (let i = 0; i < particles.length; i++) {
       array[i * 3 + 1] += particles[i].speed * delta;
 
-      if (array[i * 3 + 1] > 4) {
-        array[i * 3 + 1] = -3;
-        array[i * 3] = (Math.random() - 0.5) * 9;
-        array[i * 3 + 2] = Math.random() * -10;
+      if (array[i * 3 + 1] > 4.5) {
+        array[i * 3 + 1] = -4;
+        array[i * 3] = (Math.random() - 0.5) * 14;
+        array[i * 3 + 2] = -Math.random() * 12 - 1;
       }
     }
 
@@ -72,11 +161,12 @@ function UnderwaterBubbles() {
           itemSize={3}
         />
       </bufferGeometry>
+
       <pointsMaterial
         color="#ffffff"
-        size={0.055}
+        size={0.045}
         transparent
-        opacity={0.65}
+        opacity={0.72}
         depthWrite={false}
       />
     </points>
@@ -99,59 +189,44 @@ function UnderwaterEnvironment() {
     }
 
     clonedScene.traverse((child) => {
-      if (child.isMesh) {
+      if (child.isMesh && child.material) {
+        child.material.transparent = true;
+        child.material.opacity = 0.18;
         child.castShadow = false;
-        child.receiveShadow = true;
-
-        if (child.material) {
-          child.material.transparent = true;
-          child.material.opacity = 0.75;
-        }
+        child.receiveShadow = false;
       }
     });
   }, [actions, names, clonedScene]);
 
   return (
     <group ref={group}>
-      <ambientLight intensity={1.2} color="#c7f1ff" />
-      <directionalLight position={[2, 6, 4]} intensity={1.6} color="#e0f7ff" />
-      <pointLight position={[0, 1.5, 2]} intensity={1.2} color="#38bdf8" />
+      <ambientLight intensity={1.3} color="#dff8ff" />
+      <directionalLight position={[2, 6, 4]} intensity={1.4} color="#e0f7ff" />
+      <pointLight position={[0, 1.5, -2]} intensity={1.4} color="#38bdf8" />
 
       <primitive
         object={clonedScene}
-        position={[0, -2.4, -5.2]}
-        scale={[1.6, 1.6, 1.6]}
+        position={[0, -2.7, -5.5]}
+        scale={[1.15, 1.15, 1.15]}
       />
 
       <mesh position={[0, 0, -7.5]}>
         <planeGeometry args={[18, 12]} />
-        <meshBasicMaterial color="#075985" transparent opacity={0.3} />
+        <meshBasicMaterial color="#075985" transparent opacity={0.12} />
       </mesh>
 
-      <mesh position={[0, 3.7, -4]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[18, 18]} />
+      <mesh position={[0, 3.5, -4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[20, 20]} />
         <meshBasicMaterial
           color="#7dd3fc"
           transparent
-          opacity={0.18}
+          opacity={0.12}
           side={THREE.DoubleSide}
         />
       </mesh>
 
-      <mesh position={[-2.5, 1.2, -4]} rotation={[0.4, 0, -0.35]}>
-        <cylinderGeometry args={[0.12, 2.5, 8, 32]} />
-        <meshBasicMaterial
-          color="#e0f2fe"
-          transparent
-          opacity={0.08}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
-
-      <mesh position={[2.5, 1.4, -5]} rotation={[0.5, 0, 0.35]}>
-        <cylinderGeometry args={[0.12, 2.8, 8, 32]} />
+      <mesh position={[-2.4, 1.2, -3.6]} rotation={[0.4, 0, -0.35]}>
+        <cylinderGeometry args={[0.1, 2.4, 8, 32]} />
         <meshBasicMaterial
           color="#e0f2fe"
           transparent
@@ -161,12 +236,25 @@ function UnderwaterEnvironment() {
           side={THREE.DoubleSide}
         />
       </mesh>
+
+      <mesh position={[2.4, 1.4, -4.5]} rotation={[0.5, 0, 0.35]}>
+        <cylinderGeometry args={[0.1, 2.8, 8, 32]} />
+        <meshBasicMaterial
+          color="#e0f2fe"
+          transparent
+          opacity={0.06}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
     </group>
   );
 }
 
-function PlayerPenguin({ tilt }) {
+function PlayerPenguin() {
   const group = useRef();
+  const { camera } = useThree();
   const { scene, animations } = useGLTF("/models/penguin.glb");
   const clonedScene = useMemo(() => cloneModel(scene), [scene]);
   const { actions, names } = useAnimations(animations, group);
@@ -180,34 +268,27 @@ function PlayerPenguin({ tilt }) {
   useFrame((_, delta) => {
     if (!group.current) return;
 
-    const targetX = THREE.MathUtils.clamp(tilt.x * 2.4, -2.3, 2.3);
-    const targetY = THREE.MathUtils.clamp(-tilt.y * 1.5, -1.45, 1.35);
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
 
-    group.current.position.x = THREE.MathUtils.lerp(
-      group.current.position.x,
-      targetX,
-      delta * 5.5
-    );
+    camera.getWorldDirection(forward);
+    right.crossVectors(forward, up).normalize();
 
-    group.current.position.y = THREE.MathUtils.lerp(
-      group.current.position.y,
-      targetY,
-      delta * 5.5
-    );
+    const targetPosition = camera.position
+      .clone()
+      .add(forward.multiplyScalar(1.65))
+      .add(new THREE.Vector3(0, -0.35, 0));
 
-    group.current.position.z = 0;
-
-    group.current.rotation.z = THREE.MathUtils.lerp(
-      group.current.rotation.z,
-      -targetX * 0.18,
-      delta * 4
-    );
+    group.current.position.lerp(targetPosition, delta * 8);
+    group.current.lookAt(camera.position);
+    group.current.rotateY(Math.PI);
   });
 
   return (
-    <group ref={group} position={[0, 0, 0]}>
+    <group ref={group}>
       <group rotation={[0, Math.PI / 2, 0]}>
-        <primitive object={clonedScene} scale={0.22} />
+        <primitive object={clonedScene} scale={0.09} />
       </group>
     </group>
   );
@@ -247,8 +328,9 @@ function StaticItemModel({ modelPath, scale }) {
 
   useFrame((_, delta) => {
     if (!group.current) return;
-    group.current.rotation.x += delta * 0.8;
-    group.current.rotation.y += delta * 0.6;
+
+    group.current.rotation.x += delta * 0.7;
+    group.current.rotation.y += delta * 0.8;
   });
 
   return (
@@ -258,27 +340,38 @@ function StaticItemModel({ modelPath, scale }) {
   );
 }
 
-function GameItem({ item, playerPositionRef, onCollect, onMiss }) {
+function GameItem({ item, onCollect, onMiss }) {
   const group = useRef();
   const collectedRef = useRef(false);
+  const { camera } = useThree();
 
   useFrame((_, delta) => {
     if (!group.current || collectedRef.current) return;
 
-    group.current.position.z += item.speed * delta;
-    group.current.rotation.y += delta * item.spin;
+    const itemPosition = group.current.position;
+    const cameraPosition = camera.position.clone();
 
-    const playerPos = playerPositionRef.current;
-    const itemPos = group.current.position;
-    const distance = itemPos.distanceTo(playerPos);
+    const directionToCamera = cameraPosition.clone().sub(itemPosition).normalize();
+    itemPosition.addScaledVector(directionToCamera, item.speed * delta);
 
-    if (distance < item.hitRadius) {
+    group.current.rotation.y += item.spin * delta;
+
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+
+    const directionToItem = itemPosition.clone().sub(cameraPosition).normalize();
+    const centerDot = forward.dot(directionToItem);
+    const distance = itemPosition.distanceTo(cameraPosition);
+
+    group.current.lookAt(camera.position);
+
+    if (centerDot > 0.965 && distance < 2.15) {
       collectedRef.current = true;
       onCollect(item.id, item.type);
       return;
     }
 
-    if (itemPos.z > 1.4) {
+    if (distance < 0.45) {
       collectedRef.current = true;
       onMiss(item.id);
     }
@@ -287,15 +380,15 @@ function GameItem({ item, playerPositionRef, onCollect, onMiss }) {
   return (
     <group ref={group} position={item.position}>
       {item.type === "fish" && (
-        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.07} />
+        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.018} />
       )}
 
-      {item.type === "squid" && (
-        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.13} />
+      {item.type === "krill" && (
+        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.038} />
       )}
 
       {item.type === "plastic" && (
-        <StaticItemModel modelPath="/models/plastic.glb" scale={0.07} />
+        <StaticItemModel modelPath="/models/plastic.glb" scale={0.028} />
       )}
     </group>
   );
@@ -303,39 +396,48 @@ function GameItem({ item, playerPositionRef, onCollect, onMiss }) {
 
 function SceneContent({
   gameState,
-  tilt,
-  items,
+  activeItem,
   onCollect,
   onMiss,
-  playerPositionRef,
+  viewRef,
+  setActiveItem,
 }) {
-  useFrame(() => {
-    const targetX = THREE.MathUtils.clamp(tilt.x * 2.4, -2.3, 2.3);
-    const targetY = THREE.MathUtils.clamp(-tilt.y * 1.5, -1.45, 1.35);
-    playerPositionRef.current.set(targetX, targetY, 0);
-  });
+  const { camera } = useThree();
+
+  useEffect(() => {
+    if (gameState !== "PLAYING") return;
+
+    const spawnTimer = setInterval(() => {
+      setActiveItem((currentItem) => {
+        if (currentItem) return currentItem;
+        return createGameItem(camera);
+      });
+    }, 950);
+
+    return () => clearInterval(spawnTimer);
+  }, [camera, gameState, setActiveItem]);
 
   return (
     <>
-      <color attach="background" args={["#062a4f"]} />
-      <fog attach="fog" args={["#062a4f", 4, 13]} />
+      <CameraRig viewRef={viewRef} />
+
+      <fog attach="fog" args={["#0f6f9e", 3, 11]} />
 
       <UnderwaterEnvironment />
       <UnderwaterBubbles />
 
       {gameState === "PLAYING" && (
         <>
-          <PlayerPenguin tilt={tilt} />
+          <PlayerPenguin />
 
-          {items.map((item) => (
+          {activeItem && (
             <GameItem
-              key={item.id}
-              item={item}
-              playerPositionRef={playerPositionRef}
+              key={activeItem.id}
+              item={activeItem}
               onCollect={onCollect}
               onMiss={onMiss}
             />
-          ))}
+          )}
         </>
       )}
     </>
@@ -344,18 +446,27 @@ function SceneContent({
 
 export default function App() {
   const [gameState, setGameState] = useState("MENU");
-  const [items, setItems] = useState([]);
+  const [activeItem, setActiveItem] = useState(null);
+
   const [energy, setEnergy] = useState(START_ENERGY);
   const [fishCount, setFishCount] = useState(0);
-  const [squidCount, setSquidCount] = useState(0);
+  const [krillCount, setKrillCount] = useState(0);
   const [plasticCount, setPlasticCount] = useState(0);
   const [timeLeft, setTimeLeft] = useState(GAME_TIME);
+
   const [permissionMessage, setPermissionMessage] = useState("");
+  const [cameraReady, setCameraReady] = useState(false);
 
-  const tiltRef = useRef({ x: 0, y: 0 });
-  const [tiltState, setTiltState] = useState({ x: 0, y: 0 });
+  const videoRef = useRef(null);
+  const mediaStreamRef = useRef(null);
 
-  const playerPositionRef = useRef(new THREE.Vector3(0, 0, 0));
+  const viewRef = useRef({
+    yaw: 0,
+    pitch: 0,
+  });
+
+  const orientationBaseRef = useRef(null);
+  const lastTouchRef = useRef(null);
 
   const ambienceAudio = useRef(null);
   const collectAudio = useRef(null);
@@ -365,13 +476,13 @@ export default function App() {
   useEffect(() => {
     ambienceAudio.current = new Audio("/audios/antarctic_ambience.mp3");
     ambienceAudio.current.loop = true;
-    ambienceAudio.current.volume = 0.35;
+    ambienceAudio.current.volume = 0.28;
 
     collectAudio.current = new Audio("/audios/fish_collect.mp3");
     collectAudio.current.volume = 0.8;
 
     incorrectAudio.current = new Audio("/audios/incorrect.mp3");
-    incorrectAudio.current.volume = 0.8;
+    incorrectAudio.current.volume = 0.9;
 
     babyPenguinAudio.current = new Audio("/audios/baby_penguin.mp3");
     babyPenguinAudio.current.volume = 0.95;
@@ -381,30 +492,72 @@ export default function App() {
       collectAudio.current?.pause();
       incorrectAudio.current?.pause();
       babyPenguinAudio.current?.pause();
+
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
     };
   }, []);
 
-  useEffect(() => {
-    const syncTilt = setInterval(() => {
-      setTiltState({ ...tiltRef.current });
-    }, 33);
+  const startCamera = async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setPermissionMessage(
+          "Camera is not available on this browser. The game will still run with a water background."
+        );
+        return false;
+      }
 
-    return () => clearInterval(syncTilt);
-  }, []);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      mediaStreamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute("playsinline", "true");
+        videoRef.current.setAttribute("webkit-playsinline", "true");
+        await videoRef.current.play();
+      }
+
+      setCameraReady(true);
+      return true;
+    } catch (error) {
+      console.error("Camera error:", error);
+      setCameraReady(false);
+      setPermissionMessage(
+        "Camera permission was blocked. The game will still work, but it will not show the live camera background."
+      );
+      return false;
+    }
+  };
 
   const handleOrientation = useCallback((event) => {
-    const gamma = event.gamma || 0;
-    const beta = event.beta || 0;
+    const alpha = event.alpha ?? 0;
+    const beta = event.beta ?? 60;
 
-    const x = THREE.MathUtils.clamp(gamma / 35, -1, 1);
-    const y = THREE.MathUtils.clamp((beta - 45) / 35, -1, 1);
+    if (orientationBaseRef.current === null) {
+      orientationBaseRef.current = alpha;
+    }
 
-    tiltRef.current = { x, y };
+    let yawDeg = alpha - orientationBaseRef.current;
+
+    if (yawDeg > 180) yawDeg -= 360;
+    if (yawDeg < -180) yawDeg += 360;
+
+    const pitchDeg = THREE.MathUtils.clamp(beta - 60, -45, 45);
+
+    viewRef.current.yaw = THREE.MathUtils.degToRad(-yawDeg);
+    viewRef.current.pitch = THREE.MathUtils.degToRad(-pitchDeg * 0.75);
   }, []);
 
   const requestMotionPermission = async () => {
-    setPermissionMessage("");
-
     try {
       const DeviceOrientation =
         typeof window !== "undefined"
@@ -423,7 +576,7 @@ export default function App() {
         }
 
         setPermissionMessage(
-          "Motion permission was not allowed. You can still play by dragging on the screen."
+          "Motion permission was blocked. You can still play by dragging on the screen."
         );
         return false;
       }
@@ -432,55 +585,70 @@ export default function App() {
       return true;
     } catch (error) {
       console.error("Motion permission error:", error);
-
       setPermissionMessage(
         "Motion permission failed. You can still play by dragging on the screen."
       );
-
       return false;
     }
   };
 
   useEffect(() => {
-    const handleMouseMove = (event) => {
-      if (gameState !== "PLAYING") return;
+    const handleTouchStart = (event) => {
+      if (event.touches.length === 0) return;
 
-      const x = (event.clientX / window.innerWidth - 0.5) * 2;
-      const y = (event.clientY / window.innerHeight - 0.5) * 2;
-
-      tiltRef.current = {
-        x: THREE.MathUtils.clamp(x, -1, 1),
-        y: THREE.MathUtils.clamp(y, -1, 1),
+      lastTouchRef.current = {
+        x: event.touches[0].clientX,
+        y: event.touches[0].clientY,
       };
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-    };
-  }, [gameState]);
-
-  useEffect(() => {
     const handleTouchMove = (event) => {
       if (gameState !== "PLAYING") return;
       if (!event.touches || event.touches.length === 0) return;
+      if (!lastTouchRef.current) return;
 
       const touch = event.touches[0];
 
-      const x = (touch.clientX / window.innerWidth - 0.5) * 2;
-      const y = (touch.clientY / window.innerHeight - 0.5) * 2;
+      const deltaX = touch.clientX - lastTouchRef.current.x;
+      const deltaY = touch.clientY - lastTouchRef.current.y;
 
-      tiltRef.current = {
-        x: THREE.MathUtils.clamp(x, -1, 1),
-        y: THREE.MathUtils.clamp(y, -1, 1),
+      viewRef.current.yaw -= deltaX * 0.006;
+      viewRef.current.pitch -= deltaY * 0.006;
+
+      viewRef.current.pitch = THREE.MathUtils.clamp(
+        viewRef.current.pitch,
+        -0.75,
+        0.75
+      );
+
+      lastTouchRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
       };
     };
 
+    const handleMouseMove = (event) => {
+      if (gameState !== "PLAYING") return;
+      if (event.buttons !== 1) return;
+
+      viewRef.current.yaw -= event.movementX * 0.005;
+      viewRef.current.pitch -= event.movementY * 0.005;
+
+      viewRef.current.pitch = THREE.MathUtils.clamp(
+        viewRef.current.pitch,
+        -0.75,
+        0.75
+      );
+    };
+
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
     window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("mousemove", handleMouseMove);
 
     return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
       window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("mousemove", handleMouseMove);
     };
   }, [gameState]);
 
@@ -502,6 +670,7 @@ export default function App() {
 
     if (timeLeft <= 0 || energy <= 0) {
       setGameState("GAMEOVER");
+      setActiveItem(null);
       ambienceAudio.current?.pause();
 
       if (babyPenguinAudio.current) {
@@ -511,55 +680,16 @@ export default function App() {
     }
   }, [gameState, timeLeft, energy]);
 
-  useEffect(() => {
-    if (gameState !== "PLAYING") return;
-
-    const spawnInterval = setInterval(() => {
-      const rand = Math.random();
-
-      let type = "fish";
-
-      if (rand < 0.55) {
-        type = "fish";
-      } else if (rand < 0.85) {
-        type = "squid";
-      } else {
-        type = "plastic";
-      }
-
-      const x = (Math.random() - 0.5) * 4.6;
-      const y = (Math.random() - 0.5) * 2.7;
-      const z = -8.5 - Math.random() * 2.5;
-
-      const speed =
-        type === "plastic"
-          ? 1.55 + Math.random() * 0.5
-          : 1.35 + Math.random() * 0.5;
-
-      const newItem = {
-        id: `${Date.now()}-${Math.random()}`,
-        type,
-        position: [x, y, z],
-        speed,
-        spin: 0.6 + Math.random() * 0.8,
-        hitRadius: type === "squid" ? 0.58 : 0.5,
-      };
-
-      setItems((prev) => [...prev, newItem]);
-    }, 1200);
-
-    return () => clearInterval(spawnInterval);
-  }, [gameState]);
-
   const resetGame = () => {
-    setItems([]);
+    setActiveItem(null);
     setEnergy(START_ENERGY);
     setFishCount(0);
-    setSquidCount(0);
+    setKrillCount(0);
     setPlasticCount(0);
     setTimeLeft(GAME_TIME);
-    tiltRef.current = { x: 0, y: 0 };
-    setTiltState({ x: 0, y: 0 });
+    setPermissionMessage("");
+    viewRef.current = { yaw: 0, pitch: 0 };
+    orientationBaseRef.current = null;
   };
 
   const warmUpAudio = async () => {
@@ -588,14 +718,11 @@ export default function App() {
   const startGame = async () => {
     resetGame();
 
-    // This must happen directly from the button click for iPhone Safari.
     await requestMotionPermission();
+    await startCamera();
 
-    // Start game even if motion permission fails.
-    // User can still play by dragging on the screen.
     setGameState("PLAYING");
 
-    // Audio starts after permission request.
     setTimeout(() => {
       warmUpAudio();
 
@@ -607,7 +734,10 @@ export default function App() {
   };
 
   const handleCollect = useCallback((id, type) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+    setActiveItem((currentItem) => {
+      if (!currentItem || currentItem.id !== id) return currentItem;
+      return null;
+    });
 
     if (window.navigator?.vibrate) {
       window.navigator.vibrate(35);
@@ -623,9 +753,9 @@ export default function App() {
       }
     }
 
-    if (type === "squid") {
-      setSquidCount((prev) => prev + 1);
-      setEnergy((prev) => Math.min(100, prev + 20));
+    if (type === "krill") {
+      setKrillCount((prev) => prev + 1);
+      setEnergy((prev) => Math.min(100, prev + 18));
 
       if (collectAudio.current) {
         collectAudio.current.currentTime = 0;
@@ -645,7 +775,10 @@ export default function App() {
   }, []);
 
   const handleMiss = useCallback((id) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+    setActiveItem((currentItem) => {
+      if (!currentItem || currentItem.id !== id) return currentItem;
+      return null;
+    });
   }, []);
 
   const getResultTitle = () => {
@@ -662,30 +795,41 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <video ref={videoRef} className="camera-feed" muted playsInline />
+
+      <div className={`camera-fallback ${cameraReady ? "hidden" : ""}`} />
+
+      <div className="water-tint" />
+
       <Canvas
-        camera={{ position: [0, 0, 4.2], fov: 62 }}
+        className="game-canvas"
+        camera={{ position: [0, 0, 0], fov: 68 }}
         gl={{
-          alpha: false,
+          alpha: true,
           antialias: true,
           powerPreference: "high-performance",
         }}
       >
         <SceneContent
           gameState={gameState}
-          tilt={tiltState}
-          items={items}
+          activeItem={activeItem}
           onCollect={handleCollect}
           onMiss={handleMiss}
-          playerPositionRef={playerPositionRef}
+          viewRef={viewRef}
+          setActiveItem={setActiveItem}
         />
       </Canvas>
+
+      <div className="center-reticle">
+        <div className="reticle-dot" />
+      </div>
 
       {gameState === "PLAYING" && (
         <div className="game-hud">
           <div className="hud-card tracker-card">
             <div className="hud-label">TARGET TRACKER</div>
             <div className="hud-row fish">Fish: {fishCount}</div>
-            <div className="hud-row squid">Squid: {squidCount}</div>
+            <div className="hud-row krill">Krill: {krillCount}</div>
             <div className="hud-row plastic">Plastic: {plasticCount}</div>
           </div>
 
@@ -705,7 +849,7 @@ export default function App() {
           </div>
 
           <div className="move-helper">
-            Move your phone or drag your finger to guide ICY.
+            Look around 360° and keep the food near the center to catch it.
           </div>
         </div>
       )}
@@ -713,20 +857,24 @@ export default function App() {
       {gameState === "MENU" && (
         <div className="screen-overlay">
           <div className="menu-card">
-            <div className="small-pill">iOS / Safari PWA version</div>
+            <div className="small-pill">Fake AR Safari PWA version</div>
 
             <h1>ICY PLUNGE</h1>
 
             <p className="subtitle">
-              Help the baby penguin swim underwater and collect food.
+              Camera background + 360° underwater catching game.
             </p>
 
             <div className="instruction-box">
               <strong>How to play</strong>
               <br />
-              Move your phone left, right, up, and down. If motion is blocked,
-              drag on the screen to guide ICY. Catch fish and squid to gain
-              energy. Avoid plastic.
+              Allow camera and motion access. Move your phone around to look in
+              360°. Keep fish or krill near the center to catch them. Avoid
+              plastic because it reduces energy.
+            </div>
+
+            <div className="probability-box">
+              Fish 55% · Krill 30% · Plastic 15%
             </div>
 
             {permissionMessage && (
@@ -734,12 +882,12 @@ export default function App() {
             )}
 
             <button className="primary-button" onClick={startGame}>
-              START GAME
+              START FAKE AR GAME
             </button>
 
             <p className="support-note">
-              On iPhone, press Allow for motion permission. If it is blocked,
-              drag on the screen to play.
+              On iPhone Safari, this is a camera-overlay fake AR game. If motion
+              is blocked, drag on the screen to look around.
             </p>
           </div>
         </div>
@@ -763,7 +911,7 @@ export default function App() {
 
               <div className="final-stats">
                 <span className="fish">Fish: {fishCount}</span>
-                <span className="squid">Squid: {squidCount}</span>
+                <span className="krill">Krill: {krillCount}</span>
                 <span className="plastic">Plastic: {plasticCount}</span>
               </div>
             </div>
