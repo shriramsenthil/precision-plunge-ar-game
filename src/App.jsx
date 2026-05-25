@@ -31,15 +31,15 @@ function shuffleArray(array) {
 
 function createBalancedItemType(itemBagRef) {
   if (!itemBagRef.current || itemBagRef.current.length === 0) {
+    // 8-object cycle for 60 seconds:
+    // 3 fish, 2 krill, 1 squid, 2 plastic
     itemBagRef.current = shuffleArray([
       "fish",
       "fish",
       "fish",
-      "fish",
-      "squid",
-      "squid",
       "krill",
       "krill",
+      "squid",
       "plastic",
       "plastic",
     ]);
@@ -52,8 +52,8 @@ function createGameItem(camera, itemBagRef) {
   const type = createBalancedItemType(itemBagRef);
 
   const yaw = Math.random() * Math.PI * 2;
-  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(65));
-  const distance = 6.2 + Math.random() * 2.2;
+  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(60));
+  const distance = 5.2 + Math.random() * 1.5;
 
   const direction = new THREE.Vector3(
     Math.sin(yaw) * Math.cos(pitch),
@@ -67,8 +67,11 @@ function createGameItem(camera, itemBagRef) {
     id: `${Date.now()}-${Math.random()}`,
     type,
     position: [position.x, position.y, position.z],
-    speed: type === "plastic" ? 1.05 : 1.15,
-    spin: 0.55 + Math.random() * 0.7,
+
+    // Faster object movement toward ICY
+    speed: type === "plastic" ? 1.85 : 2.05,
+
+    spin: 0.75 + Math.random() * 0.9,
   };
 }
 
@@ -366,13 +369,13 @@ function GameItem({ item, onCollect, onMiss }) {
 
     group.current.lookAt(camera.position);
 
-    if (centerDot > 0.96 && distance < 2.25) {
+    if (centerDot > 0.93 && distance < 2.75) {
       collectedRef.current = true;
       onCollect(item.id, item.type);
       return;
     }
 
-    if (distance < 0.4) {
+    if (distance < 0.25) {
       collectedRef.current = true;
       onMiss(item.id);
     }
@@ -418,7 +421,7 @@ function SceneContent({
         if (currentItem) return currentItem;
         return createGameItem(camera, itemBagRef);
       });
-    }, 650);
+    }, 300);
 
     return () => clearInterval(spawnTimer);
   }, [camera, gameState, setActiveItem, itemBagRef]);
@@ -563,7 +566,7 @@ export default function App() {
 
     // Fixed mirror issue: do not invert yaw.
     viewRef.current.yaw = THREE.MathUtils.degToRad(yawDeg);
-    viewRef.current.pitch = THREE.MathUtils.degToRad(-pitchDeg * 0.75);
+    viewRef.current.pitch = THREE.MathUtils.degToRad(pitchDeg * 0.75);
   }, []);
 
   const requestMotionPermission = async () => {
@@ -641,7 +644,7 @@ export default function App() {
       if (event.buttons !== 1) return;
 
       viewRef.current.yaw += event.movementX * 0.005;
-      viewRef.current.pitch -= event.movementY * 0.005;
+      viewRef.current.pitch += event.movementY * 0.005;
 
       viewRef.current.pitch = THREE.MathUtils.clamp(
         viewRef.current.pitch,
