@@ -31,8 +31,6 @@ function shuffleArray(array) {
 
 function createBalancedItemType(itemBagRef) {
   if (!itemBagRef.current || itemBagRef.current.length === 0) {
-    // 10-object cycle:
-    // 4 fish, 2 squid, 2 krill, 2 plastic
     itemBagRef.current = shuffleArray([
       "fish",
       "fish",
@@ -53,11 +51,12 @@ function createBalancedItemType(itemBagRef) {
 function createGameItem(camera, itemBagRef) {
   const type = createBalancedItemType(itemBagRef);
 
-  // True 360-degree spawn around the user
+  // True 360-degree spawn around the user.
   const yaw = Math.random() * Math.PI * 2;
-  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(50));
+  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(45));
 
-  const distance = 4.8 + Math.random() * 1.4;
+  // Far enough to see, close enough to catch.
+  const distance = 4.6 + Math.random() * 1.2;
 
   const direction = new THREE.Vector3(
     Math.sin(yaw) * Math.cos(pitch),
@@ -72,10 +71,10 @@ function createGameItem(camera, itemBagRef) {
     type,
     position: [position.x, position.y, position.z],
 
-    // Medium-fast speed, not too slow and not sudden
-    speed: type === "plastic" ? 1.7 : 1.9,
+    // Medium speed. Not too fast, not too slow.
+    speed: type === "plastic" ? 0.85 : 0.95,
 
-    spin: 0.65 + Math.random() * 0.8,
+    spin: 0.55 + Math.random() * 0.65,
     bobOffset: Math.random() * Math.PI * 2,
   };
 }
@@ -235,9 +234,9 @@ function UnderwaterEnvironment() {
 
   return (
     <group ref={group}>
-      <ambientLight intensity={1.45} color="#dff8ff" />
-      <directionalLight position={[2, 6, 4]} intensity={1.35} color="#e0f7ff" />
-      <pointLight position={[0, 1.5, -2]} intensity={1.35} color="#38bdf8" />
+      <ambientLight intensity={1.55} color="#dff8ff" />
+      <directionalLight position={[2, 6, 4]} intensity={1.45} color="#e0f7ff" />
+      <pointLight position={[0, 1.5, -2]} intensity={1.5} color="#38bdf8" />
 
       <primitive
         object={clonedScene}
@@ -303,7 +302,63 @@ function PlayerPenguin() {
   );
 }
 
-function AnimatedItemModel({ modelPath, scale }) {
+function FallbackShape({ type }) {
+  if (type === "fish") {
+    return (
+      <group renderOrder={22}>
+        <mesh>
+          <sphereGeometry args={[0.22, 24, 24]} />
+          <meshBasicMaterial color="#4ade80" depthTest={false} depthWrite={false} />
+        </mesh>
+        <mesh position={[-0.26, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <coneGeometry args={[0.14, 0.26, 3]} />
+          <meshBasicMaterial color="#22c55e" depthTest={false} depthWrite={false} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (type === "squid") {
+    return (
+      <group renderOrder={22}>
+        <mesh>
+          <coneGeometry args={[0.22, 0.42, 24]} />
+          <meshBasicMaterial color="#a78bfa" depthTest={false} depthWrite={false} />
+        </mesh>
+        <mesh position={[0, -0.25, 0]}>
+          <sphereGeometry args={[0.16, 16, 16]} />
+          <meshBasicMaterial color="#7c3aed" depthTest={false} depthWrite={false} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (type === "krill") {
+    return (
+      <group renderOrder={22}>
+        <mesh>
+          <capsuleGeometry args={[0.12, 0.32, 8, 16]} />
+          <meshBasicMaterial color="#c084fc" depthTest={false} depthWrite={false} />
+        </mesh>
+      </group>
+    );
+  }
+
+  return (
+    <group renderOrder={22}>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.12, 0.12, 0.46, 18]} />
+        <meshBasicMaterial color="#fb7185" depthTest={false} depthWrite={false} />
+      </mesh>
+      <mesh position={[0, 0.26, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.08, 0.08, 0.12, 18]} />
+        <meshBasicMaterial color="#fecaca" depthTest={false} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+}
+
+function NormalizedAnimatedModel({ modelPath, type, targetSize }) {
   const { scene, animations } = useGLTF(modelPath);
   const clonedScene = useMemo(() => cloneModel(scene), [scene]);
   const mixer = useMemo(
@@ -311,7 +366,36 @@ function AnimatedItemModel({ modelPath, scale }) {
     [clonedScene]
   );
 
+  const normalized = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(clonedScene);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+
+    box.getSize(size);
+    box.getCenter(center);
+
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const scale = targetSize / maxDim;
+
+    return {
+      center,
+      scale,
+    };
+  }, [clonedScene, targetSize]);
+
   useEffect(() => {
+    clonedScene.traverse((child) => {
+      child.renderOrder = 30;
+
+      if (child.isMesh && child.material) {
+        child.material = child.material.clone();
+        child.material.side = THREE.DoubleSide;
+        child.material.depthTest = false;
+        child.material.depthWrite = false;
+        child.material.needsUpdate = true;
+      }
+    });
+
     if (animations?.length) {
       animations.forEach((clip) => {
         mixer.clipAction(clip).reset().play().setEffectiveTimeScale(1.25);
@@ -321,25 +405,56 @@ function AnimatedItemModel({ modelPath, scale }) {
     return () => {
       mixer.stopAllAction();
     };
-  }, [animations, mixer]);
+  }, [animations, mixer, clonedScene]);
 
   useFrame((_, delta) => {
     mixer.update(delta);
   });
 
-  return <primitive object={clonedScene} scale={scale} />;
+  return (
+    <group scale={normalized.scale}>
+      <primitive
+        object={clonedScene}
+        position={[
+          -normalized.center.x,
+          -normalized.center.y,
+          -normalized.center.z,
+        ]}
+      />
+      <FallbackShape type={type} />
+    </group>
+  );
 }
 
-function StaticItemModel({ modelPath, scale }) {
+function NormalizedStaticModel({ modelPath, type, targetSize }) {
   const { scene } = useGLTF(modelPath);
   const clonedScene = useMemo(() => cloneModel(scene), [scene]);
   const group = useRef();
 
+  const normalized = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(clonedScene);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+
+    box.getSize(size);
+    box.getCenter(center);
+
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const scale = targetSize / maxDim;
+
+    return {
+      center,
+      scale,
+    };
+  }, [clonedScene, targetSize]);
+
   useEffect(() => {
     clonedScene.traverse((child) => {
-      child.renderOrder = 20;
+      child.renderOrder = 30;
 
       if (child.isMesh && child.material) {
+        child.material = child.material.clone();
+        child.material.side = THREE.DoubleSide;
         child.material.depthTest = false;
         child.material.depthWrite = false;
         child.material.needsUpdate = true;
@@ -350,13 +465,21 @@ function StaticItemModel({ modelPath, scale }) {
   useFrame((_, delta) => {
     if (!group.current) return;
 
-    group.current.rotation.x += delta * 0.7;
-    group.current.rotation.y += delta * 0.8;
+    group.current.rotation.x += delta * 0.55;
+    group.current.rotation.y += delta * 0.65;
   });
 
   return (
-    <group ref={group}>
-      <primitive object={clonedScene} scale={scale} />
+    <group ref={group} scale={normalized.scale}>
+      <primitive
+        object={clonedScene}
+        position={[
+          -normalized.center.x,
+          -normalized.center.y,
+          -normalized.center.z,
+        ]}
+      />
+      <FallbackShape type={type} />
     </group>
   );
 }
@@ -380,9 +503,7 @@ function GameItem({ item, onCollect, onMiss }) {
     itemPosition.addScaledVector(directionToCamera, item.speed * delta);
 
     group.current.position.y +=
-      Math.sin(state.clock.elapsedTime * 2.2 + item.bobOffset) * 0.003;
-
-    group.current.rotation.y += item.spin * delta;
+      Math.sin(state.clock.elapsedTime * 2.2 + item.bobOffset) * 0.0025;
 
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
@@ -393,34 +514,41 @@ function GameItem({ item, onCollect, onMiss }) {
 
     group.current.lookAt(camera.position);
 
+    // Important:
+    // lookAt makes local -Z face the camera.
+    // So the model must be on -Z, and ring/glow must be on +Z behind the model.
+
+    const scaleByDistance = THREE.MathUtils.clamp(distance / 4.3, 0.58, 1.0);
+    group.current.scale.setScalar(scaleByDistance);
+
     const focusAmount = THREE.MathUtils.clamp((centerDot - 0.82) / 0.16, 0, 1);
 
     if (glowRef.current) {
-      const glowScale = 0.9 + focusAmount * 0.35;
+      const glowScale = 0.72 + focusAmount * 0.22;
       glowRef.current.scale.set(glowScale, glowScale, glowScale);
-      glowRef.current.material.opacity = 0.08 + focusAmount * 0.12;
+      glowRef.current.material.opacity = 0.08 + focusAmount * 0.1;
     }
 
     if (ringRef.current) {
-      const ringScale = 0.9 + focusAmount * 0.25;
+      const ringScale = 0.75 + focusAmount * 0.18;
       ringRef.current.scale.set(ringScale, ringScale, ringScale);
-      ringRef.current.material.opacity = 0.28 + focusAmount * 0.18;
+      ringRef.current.material.opacity = 0.24 + focusAmount * 0.12;
     }
 
-    // Catch only when object is visible near center
-    if (centerDot > 0.925 && distance < 2.9) {
+    if (centerDot > 0.925 && distance < 2.55) {
       visibleTimeRef.current += delta;
     } else {
       visibleTimeRef.current = 0;
     }
 
-    if (centerDot > 0.94 && distance < 2.55 && visibleTimeRef.current > 0.2) {
+    if (centerDot > 0.94 && distance < 2.15 && visibleTimeRef.current > 0.28) {
       collectedRef.current = true;
       onCollect(item.id, item.type);
       return;
     }
 
-    if (distance < 0.12) {
+    // If it passes the user without a clear catch, remove it.
+    if (distance < 1.05) {
       collectedRef.current = true;
       onMiss(item.id);
     }
@@ -437,8 +565,8 @@ function GameItem({ item, onCollect, onMiss }) {
 
   return (
     <group ref={group} position={item.position}>
-      {/* Smaller, softer glow behind object */}
-      <mesh ref={glowRef} position={[0, 0, -0.18]} renderOrder={1}>
+      {/* Ring and glow BEHIND the object */}
+      <mesh ref={glowRef} position={[0, 0, 0.14]} renderOrder={1}>
         <sphereGeometry args={[0.42, 24, 24]} />
         <meshBasicMaterial
           color={glowColor}
@@ -450,35 +578,50 @@ function GameItem({ item, onCollect, onMiss }) {
         />
       </mesh>
 
-      {/* Smaller ring, does not hide the object */}
-      <mesh ref={ringRef} position={[0, 0, -0.2]} renderOrder={2}>
-        <ringGeometry args={[0.32, 0.36, 40]} />
+      <mesh ref={ringRef} position={[0, 0, 0.16]} renderOrder={2}>
+        <ringGeometry args={[0.28, 0.32, 40]} />
         <meshBasicMaterial
           color={glowColor}
           transparent
-          opacity={0.25}
+          opacity={0.28}
           depthWrite={false}
           depthTest={false}
           side={THREE.DoubleSide}
         />
       </mesh>
 
-      {/* Object is placed in front of the ring */}
-      <group position={[0, 0, 0.18]} renderOrder={20}>
+      {/* Object IN FRONT of the ring */}
+      <group position={[0, 0, -0.18]} renderOrder={30}>
         {item.type === "fish" && (
-          <AnimatedItemModel modelPath="/models/fish.glb" scale={0.018} />
+          <NormalizedAnimatedModel
+            modelPath="/models/fish.glb"
+            type="fish"
+            targetSize={0.72}
+          />
         )}
 
         {item.type === "squid" && (
-          <AnimatedItemModel modelPath="/models/squid.glb" scale={0.052} />
+          <NormalizedAnimatedModel
+            modelPath="/models/squid.glb"
+            type="squid"
+            targetSize={0.72}
+          />
         )}
 
         {item.type === "krill" && (
-          <AnimatedItemModel modelPath="/models/krill.glb" scale={0.045} />
+          <NormalizedAnimatedModel
+            modelPath="/models/krill.glb"
+            type="krill"
+            targetSize={0.62}
+          />
         )}
 
         {item.type === "plastic" && (
-          <StaticItemModel modelPath="/models/plastic.glb" scale={0.048} />
+          <NormalizedStaticModel
+            modelPath="/models/plastic.glb"
+            type="plastic"
+            targetSize={0.68}
+          />
         )}
       </group>
     </group>
@@ -504,7 +647,7 @@ function SceneContent({
         if (currentItem) return currentItem;
         return createGameItem(camera, itemBagRef);
       });
-    }, 290);
+    }, 350);
 
     return () => clearInterval(spawnTimer);
   }, [camera, gameState, setActiveItem, itemBagRef]);
@@ -959,7 +1102,7 @@ export default function App() {
           </div>
 
           <div className="move-helper">
-            Keep the target on the glowing food to collect energy. Avoid plastic.
+            Keep the target on the visible food to collect energy. Avoid plastic.
           </div>
         </div>
       )}
@@ -996,7 +1139,7 @@ export default function App() {
             </button>
 
             <p className="support-note">
-              Tip: Follow the glowing circle. If motion is blocked, drag on the
+              Tip: Follow the visible target. If motion is blocked, drag on the
               screen to look around.
             </p>
           </div>
