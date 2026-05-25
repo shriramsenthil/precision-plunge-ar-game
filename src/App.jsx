@@ -154,8 +154,8 @@ function Spawner({ onSpawn }) {
       // 1. UPDATED PROBABILITIES: Fish 60%, Squid 30%, Plastic 10%
       const rand = Math.random();
       let itemType;
-      if (rand < 0.60) itemType = 'fish';
-      else if (rand < 0.90) itemType = 'squid';
+      if (rand < 0.55) itemType = 'fish';
+      else if (rand < 0.85) itemType = 'squid';
       else itemType = 'plastic';
       
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -243,9 +243,9 @@ function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
 
   return (
     <group ref={group} position={startPos}>
-      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.0015} />}
-      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.5} />}
-      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.015} />}
+      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.05} />}
+      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.1} />}
+      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.05} />}
     </group>
   );
 }
