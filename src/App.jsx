@@ -1,50 +1,80 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useGLTF, useAnimations } from '@react-three/drei';
-import * as THREE from 'three';
-import { SkeletonUtils } from 'three-stdlib';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { useAnimations, useGLTF } from "@react-three/drei";
+import * as THREE from "three";
+import { SkeletonUtils } from "three-stdlib";
+import "./App.css";
 
-// Preload assets
 useGLTF.preload("/models/penguin.glb");
 useGLTF.preload("/models/seabed.glb");
 useGLTF.preload("/models/fish.glb");
 useGLTF.preload("/models/squid.glb");
 useGLTF.preload("/models/plastic.glb");
 
-function XRManager({ session }) {
-  const { gl } = useThree();
+const GAME_TIME = 60;
+const START_ENERGY = 50;
+
+function useIsIOS() {
+  const [isIOS, setIsIOS] = useState(false);
+
   useEffect(() => {
-    if (session) {
-      gl.xr.enabled = true;
-      gl.xr.setReferenceSpaceType('local-floor');
-      gl.xr.setSession(session).catch((err) => console.error("XR Session Bind Error:", err));
-    }
-  }, [session, gl]);
-  return null;
+    const ua = window.navigator.userAgent || "";
+    const platform = window.navigator.platform || "";
+    const iOS =
+      /iPad|iPhone|iPod/.test(ua) ||
+      (platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
+
+    setIsIOS(iOS);
+  }, []);
+
+  return isIOS;
 }
 
-function Bubbles() {
+function cloneModel(scene) {
+  return SkeletonUtils.clone(scene);
+}
+
+function UnderwaterBubbles() {
   const pointsRef = useRef();
-  const [particles] = useState(() => {
+
+  const particles = useMemo(() => {
     const temp = [];
-    for (let i = 0; i < 75; i++) {
+    for (let i = 0; i < 110; i++) {
       temp.push({
-        pos: [(Math.random() - 0.5) * 10, Math.random() * 5, (Math.random() - 0.5) * 10],
-        vel: Math.random() * 0.5 + 0.2
+        x: (Math.random() - 0.5) * 9,
+        y: Math.random() * 7 - 3,
+        z: Math.random() * -10,
+        speed: 0.25 + Math.random() * 0.55,
       });
     }
     return temp;
-  });
+  }, []);
+
+  const positions = useMemo(() => {
+    return new Float32Array(particles.flatMap((p) => [p.x, p.y, p.z]));
+  }, [particles]);
 
   useFrame((_, delta) => {
     if (!pointsRef.current) return;
-    const positions = pointsRef.current.geometry.attributes.position.array;
-    for (let i = 0; i < 75; i++) {
-      positions[i * 3 + 1] += particles[i].vel * delta; 
-      if (positions[i * 3 + 1] > 4) {
-        positions[i * 3 + 1] = -1.5; 
+
+    const array = pointsRef.current.geometry.attributes.position.array;
+
+    for (let i = 0; i < particles.length; i++) {
+      array[i * 3 + 1] += particles[i].speed * delta;
+
+      if (array[i * 3 + 1] > 4) {
+        array[i * 3 + 1] = -3;
+        array[i * 3] = (Math.random() - 0.5) * 9;
+        array[i * 3 + 2] = Math.random() * -10;
       }
     }
+
     pointsRef.current.geometry.attributes.position.needsUpdate = true;
   });
 
@@ -54,161 +84,184 @@ function Bubbles() {
         <bufferAttribute
           attach="attributes-position"
           count={particles.length}
-          array={new Float32Array(particles.flatMap(p => p.pos))}
+          array={positions}
           itemSize={3}
         />
       </bufferGeometry>
-      <pointsMaterial color="white" size={0.04} transparent opacity={0.6} />
+      <pointsMaterial
+        color="#ffffff"
+        size={0.055}
+        transparent
+        opacity={0.65}
+        depthWrite={false}
+      />
     </points>
   );
 }
 
-function PlayerPenguin() {
+function UnderwaterEnvironment() {
   const group = useRef();
-  const { scene, animations } = useGLTF("/models/penguin.glb");
+  const { scene, animations } = useGLTF("/models/seabed.glb");
+  const clonedScene = useMemo(() => cloneModel(scene), [scene]);
   const { actions, names } = useAnimations(animations, group);
-  const { camera } = useThree();
 
   useEffect(() => {
-    if (names && names.length > 0 && actions[names[0]]) {
+    if (names?.length) {
+      names.forEach((name) => {
+        if (actions[name]) {
+          actions[name].reset().play();
+        }
+      });
+    }
+
+    clonedScene.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = false;
+        child.receiveShadow = true;
+
+        if (child.material) {
+          child.material.transparent = true;
+          child.material.opacity = 0.75;
+        }
+      }
+    });
+  }, [actions, names, clonedScene]);
+
+  return (
+    <group ref={group}>
+      <ambientLight intensity={1.2} color="#c7f1ff" />
+      <directionalLight position={[2, 6, 4]} intensity={1.6} color="#e0f7ff" />
+      <pointLight position={[0, 1.5, 2]} intensity={1.2} color="#38bdf8" />
+
+      <primitive
+        object={clonedScene}
+        position={[0, -2.4, -5.2]}
+        scale={[1.6, 1.6, 1.6]}
+      />
+
+      <mesh position={[0, 0, -7.5]}>
+        <planeGeometry args={[18, 12]} />
+        <meshBasicMaterial color="#075985" transparent opacity={0.3} />
+      </mesh>
+
+      <mesh position={[0, 3.7, -4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[18, 18]} />
+        <meshBasicMaterial
+          color="#7dd3fc"
+          transparent
+          opacity={0.18}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      <mesh position={[-2.5, 1.2, -4]} rotation={[0.4, 0, -0.35]}>
+        <cylinderGeometry args={[0.12, 2.5, 8, 32]} />
+        <meshBasicMaterial
+          color="#e0f2fe"
+          transparent
+          opacity={0.08}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      <mesh position={[2.5, 1.4, -5]} rotation={[0.5, 0, 0.35]}>
+        <cylinderGeometry args={[0.12, 2.8, 8, 32]} />
+        <meshBasicMaterial
+          color="#e0f2fe"
+          transparent
+          opacity={0.07}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+function PlayerPenguin({ tilt }) {
+  const group = useRef();
+  const { scene, animations } = useGLTF("/models/penguin.glb");
+  const clonedScene = useMemo(() => cloneModel(scene), [scene]);
+  const { actions, names } = useAnimations(animations, group);
+
+  useEffect(() => {
+    if (names?.length && actions[names[0]]) {
       actions[names[0]].reset().play();
     }
   }, [actions, names]);
 
   useFrame((_, delta) => {
     if (!group.current) return;
-    const targetPosition = new THREE.Vector3(0, -0.25, -1.3);
-    targetPosition.applyMatrix4(camera.matrixWorld);
-    group.current.position.lerp(targetPosition, delta * 5.5);
-    
-    const lookTarget = new THREE.Vector3(camera.position.x, group.current.position.y, camera.position.z);
-    group.current.lookAt(lookTarget);
+
+    const targetX = THREE.MathUtils.clamp(tilt.x * 2.4, -2.3, 2.3);
+    const targetY = THREE.MathUtils.clamp(-tilt.y * 1.5, -1.45, 1.35);
+
+    group.current.position.x = THREE.MathUtils.lerp(
+      group.current.position.x,
+      targetX,
+      delta * 5.5
+    );
+
+    group.current.position.y = THREE.MathUtils.lerp(
+      group.current.position.y,
+      targetY,
+      delta * 5.5
+    );
+
+    group.current.position.z = 0;
+
+    group.current.rotation.z = THREE.MathUtils.lerp(
+      group.current.rotation.z,
+      -targetX * 0.18,
+      delta * 4
+    );
   });
 
   return (
-    <group ref={group}>
-      <group rotation={[0, -Math.PI / 2 + Math.PI, 0]}>
-        <primitive object={scene} scale={0.15} />
+    <group ref={group} position={[0, 0, 0]}>
+      <group rotation={[0, Math.PI / 2, 0]}>
+        <primitive object={clonedScene} scale={0.22} />
       </group>
     </group>
   );
 }
 
-function Environment() {
-  const group = useRef();
-  const { scene, animations } = useGLTF("/models/seabed.glb");
-  const { actions, names } = useAnimations(animations, group);
-
-  useEffect(() => {
-    if (names && names.length > 0) {
-      names.forEach(name => {
-        if (actions[name]) actions[name].reset().play();
-      });
-    }
-    if (scene) {
-      scene.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-          const meshName = child.name.toLowerCase();
-          if (meshName.includes('sand') || meshName.includes('floor') || meshName.includes('ground')) {
-            child.material.transparent = true;
-            child.material.opacity = 0.15; 
-          }
-        }
-      });
-    }
-  }, [scene, actions, names]);
-
-  return (
-    <group ref={group}>
-      <ambientLight intensity={0.9} color="#bae6fd" />
-      <directionalLight position={[2, 8, 2]} intensity={1.5} color="#e0f2fe" />
-      <pointLight position={[0, 2, 0]} intensity={0.5} color="#38bdf8" />
-      
-      <primitive object={scene} position={[0, -1.4, -1.5]} scale={[1.2, 1.2, 1.2]} />
-
-      <mesh position={[0, 3.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[50, 50]} />
-        <meshBasicMaterial color="#0ea5e9" transparent opacity={0.2} side={THREE.DoubleSide} />
-      </mesh>
-
-      <mesh position={[0, 1.5, -2]} rotation={[Math.PI / 8, 0, 0]}>
-        <cylinderGeometry args={[0.2, 4, 8, 32]} />
-        <meshBasicMaterial color="#e0f2fe" transparent opacity={0.08} depthWrite={false} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
-      </mesh>
-      
-      <mesh position={[-2, 1.5, -1]} rotation={[Math.PI / 6, 0, -Math.PI / 12]}>
-        <cylinderGeometry args={[0.1, 2, 8, 32]} />
-        <meshBasicMaterial color="#e0f2fe" transparent opacity={0.06} depthWrite={false} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
-      </mesh>
-    </group>
-  );
-}
-
-function Spawner({ onSpawn }) {
-  const { camera } = useThree();
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // 1. UPDATED PROBABILITIES: Fish 60%, Squid 30%, Plastic 10%
-      const rand = Math.random();
-      let itemType;
-      if (rand < 0.55) itemType = 'fish';
-      else if (rand < 0.85) itemType = 'squid';
-      else itemType = 'plastic';
-      
-      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-      forward.y = 0; 
-      forward.normalize();
-
-      const spawnDistance = 5.0 + Math.random() * 2.0; 
-      const lateralOffset = (Math.random() - 0.5) * 3.0;
-
-      const spawnX = camera.position.x + (forward.x * spawnDistance) - (forward.z * lateralOffset);
-      const spawnZ = camera.position.z + (forward.z * spawnDistance) + (forward.x * lateralOffset);
-      const spawnY = camera.position.y - 0.25 + (Math.random() - 0.5) * 1.5; 
-
-      onSpawn({
-        id: Date.now() + Math.random(),
-        type: itemType,
-        pos: [spawnX, spawnY, spawnZ],
-        speed: 0.8 + Math.random() * 0.4
-      });
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [camera, onSpawn]);
-
-  return null;
-}
-
-function AnimatedItem({ modelPath, scale }) {
+function AnimatedItemModel({ modelPath, scale }) {
   const { scene, animations } = useGLTF(modelPath);
-  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const clonedScene = useMemo(() => cloneModel(scene), [scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
 
   useEffect(() => {
-    if (animations && animations.length > 0) {
-      mixer.clipAction(animations[0]).play().setEffectiveTimeScale(1.5); 
+    if (animations?.length) {
+      animations.forEach((clip) => {
+        mixer.clipAction(clip).reset().play().setEffectiveTimeScale(1.25);
+      });
     }
-    return () => mixer.stopAllAction();
-  }, [mixer, animations]);
 
-  useFrame((_, delta) => mixer.update(delta));
+    return () => {
+      mixer.stopAllAction();
+    };
+  }, [animations, mixer]);
+
+  useFrame((_, delta) => {
+    mixer.update(delta);
+  });
+
   return <primitive object={clonedScene} scale={scale} />;
 }
 
-function StaticItem({ modelPath, scale }) {
+function StaticItemModel({ modelPath, scale }) {
   const { scene } = useGLTF(modelPath);
-  const clonedScene = useMemo(() => scene.clone(), [scene]);
+  const clonedScene = useMemo(() => cloneModel(scene), [scene]);
   const group = useRef();
-  
+
   useFrame((_, delta) => {
-    if (group.current) {
-      group.current.rotation.x += delta * 0.5;
-      group.current.rotation.y += delta * 0.5;
-    }
+    if (!group.current) return;
+    group.current.rotation.x += delta * 0.8;
+    group.current.rotation.y += delta * 0.6;
   });
 
   return (
@@ -218,291 +271,517 @@ function StaticItem({ modelPath, scale }) {
   );
 }
 
-function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
+function GameItem({ item, playerPositionRef, onCollect, onMiss }) {
   const group = useRef();
-  const { camera } = useThree();
+  const collectedRef = useRef(false);
 
   useFrame((_, delta) => {
-    if (!group.current) return;
+    if (!group.current || collectedRef.current) return;
 
-    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(camera.quaternion);
-    forward.y = 0; 
-    forward.normalize();
-    group.current.position.addScaledVector(forward, speed * delta);
+    group.current.position.z += item.speed * delta;
+    group.current.rotation.y += delta * item.spin;
 
-    const penguinPos = new THREE.Vector3(0, -0.25, -1.3).applyMatrix4(camera.matrixWorld);
-    const distToPenguin = group.current.position.distanceTo(penguinPos);
+    const playerPos = playerPositionRef.current;
+    const itemPos = group.current.position;
 
-    if (distToPenguin < 0.5) {
-      onCollect(id, type);
-    } 
-    else if (group.current.position.distanceTo(camera.position) < 0.5 || group.current.position.distanceTo(penguinPos) > 10) {
-      onMiss(id);
+    const distance = itemPos.distanceTo(playerPos);
+
+    if (distance < item.hitRadius) {
+      collectedRef.current = true;
+      onCollect(item.id, item.type);
+      return;
+    }
+
+    if (itemPos.z > 1.4) {
+      collectedRef.current = true;
+      onMiss(item.id);
     }
   });
 
   return (
-    <group ref={group} position={startPos}>
-      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.05} />}
-      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.1} />}
-      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.05} />}
+    <group ref={group} position={item.position}>
+      {item.type === "fish" && (
+        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.07} />
+      )}
+
+      {item.type === "squid" && (
+        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.13} />
+      )}
+
+      {item.type === "plastic" && (
+        <StaticItemModel modelPath="/models/plastic.glb" scale={0.07} />
+      )}
     </group>
   );
 }
 
-// 5. MAIN APP CONTAINER
+function SceneContent({
+  gameState,
+  tilt,
+  items,
+  onCollect,
+  onMiss,
+  playerPositionRef,
+}) {
+  useFrame(() => {
+    const targetX = THREE.MathUtils.clamp(tilt.x * 2.4, -2.3, 2.3);
+    const targetY = THREE.MathUtils.clamp(-tilt.y * 1.5, -1.45, 1.35);
+    playerPositionRef.current.set(targetX, targetY, 0);
+  });
+
+  return (
+    <>
+      <color attach="background" args={["#062a4f"]} />
+      <fog attach="fog" args={["#062a4f", 4, 13]} />
+
+      <UnderwaterEnvironment />
+      <UnderwaterBubbles />
+
+      {gameState === "PLAYING" && (
+        <>
+          <PlayerPenguin tilt={tilt} />
+
+          {items.map((item) => (
+            <GameItem
+              key={item.id}
+              item={item}
+              playerPositionRef={playerPositionRef}
+              onCollect={onCollect}
+              onMiss={onMiss}
+            />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
 export default function App() {
-  const [gameState, setGameState] = useState('MENU'); 
+  const isIOS = useIsIOS();
+
+  const [gameState, setGameState] = useState("MENU");
   const [items, setItems] = useState([]);
-  
-  const [health, setHealth] = useState(50); 
+  const [energy, setEnergy] = useState(START_ENERGY);
   const [fishCount, setFishCount] = useState(0);
   const [squidCount, setSquidCount] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(60); 
-  const [xrSession, setXrSession] = useState(null);
+  const [plasticCount, setPlasticCount] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(GAME_TIME);
+  const [permissionMessage, setPermissionMessage] = useState("");
+
+  const tiltRef = useRef({ x: 0, y: 0 });
+  const [tiltState, setTiltState] = useState({ x: 0, y: 0 });
+
+  const playerPositionRef = useRef(new THREE.Vector3(0, 0, 0));
 
   const ambienceAudio = useRef(null);
-  const chirpAudio = useRef(null);
   const collectAudio = useRef(null);
+  const incorrectAudio = useRef(null);
+  const babyPenguinAudio = useRef(null);
 
   useEffect(() => {
     ambienceAudio.current = new Audio("/audios/antarctic_ambience.mp3");
     ambienceAudio.current.loop = true;
-    ambienceAudio.current.volume = 0.4;
-
-    chirpAudio.current = new Audio("/audios/baby_penguin.mp3");
-    chirpAudio.current.volume = 1.0;
+    ambienceAudio.current.volume = 0.35;
 
     collectAudio.current = new Audio("/audios/fish_collect.mp3");
     collectAudio.current.volume = 0.8;
 
+    incorrectAudio.current = new Audio("/audios/incorrect.mp3");
+    incorrectAudio.current.volume = 0.8;
+
+    babyPenguinAudio.current = new Audio("/audios/baby_penguin.mp3");
+    babyPenguinAudio.current.volume = 0.95;
+
     return () => {
-      if (ambienceAudio.current) ambienceAudio.current.pause();
-      if (chirpAudio.current) chirpAudio.current.pause();
+      ambienceAudio.current?.pause();
+      collectAudio.current?.pause();
+      incorrectAudio.current?.pause();
+      babyPenguinAudio.current?.pause();
     };
   }, []);
 
   useEffect(() => {
-    let timer;
-    if (gameState === 'PLAYING' && timeLeft > 0 && health > 0) {
-      timer = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
-    } else if ((timeLeft === 0 || health <= 0) && gameState === 'PLAYING') {
-      setGameState('GAMEOVER');
-      
-      if (ambienceAudio.current) ambienceAudio.current.pause();
-      if (chirpAudio.current) {
-        chirpAudio.current.currentTime = 0;
-        chirpAudio.current.play().catch(e => console.log("Audio play blocked:", e));
+    const syncTilt = setInterval(() => {
+      setTiltState({ ...tiltRef.current });
+    }, 33);
+
+    return () => clearInterval(syncTilt);
+  }, []);
+
+  const handleOrientation = useCallback((event) => {
+    const gamma = event.gamma || 0;
+    const beta = event.beta || 0;
+
+    const x = THREE.MathUtils.clamp(gamma / 35, -1, 1);
+    const y = THREE.MathUtils.clamp((beta - 45) / 35, -1, 1);
+
+    tiltRef.current = { x, y };
+  }, []);
+
+  const requestMotionPermission = async () => {
+    setPermissionMessage("");
+
+    try {
+      if (
+        typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function"
+      ) {
+        const result = await DeviceOrientationEvent.requestPermission();
+
+        if (result !== "granted") {
+          setPermissionMessage(
+            "Motion permission was blocked. Please allow Motion & Orientation access in Safari settings, then try again."
+          );
+          return false;
+        }
       }
 
-      if (xrSession) xrSession.end(); 
+      window.addEventListener("deviceorientation", handleOrientation, true);
+      return true;
+    } catch (error) {
+      console.error("Motion permission error:", error);
+      setPermissionMessage(
+        "Motion permission failed. You can still test on desktop using mouse movement."
+      );
+      return false;
     }
-    return () => clearInterval(timer);
-  }, [gameState, timeLeft, health, xrSession]);
+  };
 
-  const initiateXRSession = async () => {
-    if (!navigator.xr) {
-      setGameState('PLAYING');
+  useEffect(() => {
+    const handleMouseMove = (event) => {
+      if (gameState !== "PLAYING") return;
+
+      const x = (event.clientX / window.innerWidth - 0.5) * 2;
+      const y = (event.clientY / window.innerHeight - 0.5) * 2;
+
+      tiltRef.current = {
+        x: THREE.MathUtils.clamp(x, -1, 1),
+        y: THREE.MathUtils.clamp(y, -1, 1),
+      };
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+    };
+  }, [gameState]);
+
+  useEffect(() => {
+    if (gameState !== "PLAYING") return;
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          return 0;
+        }
+
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [gameState]);
+
+  useEffect(() => {
+    if (gameState !== "PLAYING") return;
+
+    if (timeLeft <= 0 || energy <= 0) {
+      setGameState("GAMEOVER");
+      ambienceAudio.current?.pause();
+
+      if (babyPenguinAudio.current) {
+        babyPenguinAudio.current.currentTime = 0;
+        babyPenguinAudio.current.play().catch(() => {});
+      }
+    }
+  }, [gameState, timeLeft, energy]);
+
+  useEffect(() => {
+    if (gameState !== "PLAYING") return;
+
+    const spawnInterval = setInterval(() => {
+      const rand = Math.random();
+
+      let type = "fish";
+
+      if (rand < 0.55) {
+        type = "fish";
+      } else if (rand < 0.85) {
+        type = "squid";
+      } else {
+        type = "plastic";
+      }
+
+      const x = (Math.random() - 0.5) * 4.6;
+      const y = (Math.random() - 0.5) * 2.7;
+      const z = -8.5 - Math.random() * 2.5;
+
+      const speed =
+        type === "plastic"
+          ? 1.55 + Math.random() * 0.5
+          : 1.35 + Math.random() * 0.5;
+
+      const newItem = {
+        id: `${Date.now()}-${Math.random()}`,
+        type,
+        position: [x, y, z],
+        speed,
+        spin: 0.6 + Math.random() * 0.8,
+        hitRadius: type === "squid" ? 0.58 : 0.5,
+      };
+
+      setItems((prev) => [...prev, newItem]);
+    }, 1200);
+
+    return () => clearInterval(spawnInterval);
+  }, [gameState]);
+
+  const resetGame = () => {
+    setItems([]);
+    setEnergy(START_ENERGY);
+    setFishCount(0);
+    setSquidCount(0);
+    setPlasticCount(0);
+    setTimeLeft(GAME_TIME);
+    tiltRef.current = { x: 0, y: 0 };
+    setTiltState({ x: 0, y: 0 });
+  };
+
+  const warmUpAudio = async () => {
+    const audios = [
+      ambienceAudio.current,
+      collectAudio.current,
+      incorrectAudio.current,
+      babyPenguinAudio.current,
+    ];
+
+    for (const audio of audios) {
+      if (!audio) continue;
+
+      try {
+        audio.muted = true;
+        await audio.play();
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+      } catch {
+        audio.muted = false;
+      }
+    }
+  };
+
+  const startGame = async () => {
+    resetGame();
+
+    await warmUpAudio();
+
+    const motionReady = await requestMotionPermission();
+
+    if (!motionReady && isIOS) {
       return;
     }
 
-    if (collectAudio.current) {
-      collectAudio.current.play().then(() => {
-        collectAudio.current.pause();
-        collectAudio.current.currentTime = 0;
-      }).catch(e => console.log("Warmup blocked:", e));
-    }
+    setGameState("PLAYING");
 
-    try {
-      const session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['local-floor', 'dom-overlay'],
-        domOverlay: { root: document.getElementById('xr-overlay') || document.body }
-      });
-      
-      setXrSession(session);
-      setHealth(50);
-      setFishCount(0);
-      setSquidCount(0);
-      setTimeLeft(60); 
-      setItems([]);
-      setGameState('PLAYING');
-
-      if (ambienceAudio.current) {
-        ambienceAudio.current.currentTime = 0;
-        ambienceAudio.current.play().catch(e => console.log("Audio blocked:", e));
-      }
-
-      session.addEventListener('end', () => {
-        setXrSession(null);
-        if (ambienceAudio.current) ambienceAudio.current.pause();
-        setGameState(prev => prev === 'PLAYING' ? 'MENU' : prev);
-      });
-    } catch (e) {
-      console.error("Failed to start AR Session:", e);
-      setGameState('PLAYING');
+    if (ambienceAudio.current) {
+      ambienceAudio.current.currentTime = 0;
+      ambienceAudio.current.play().catch(() => {});
     }
   };
 
-  const handleSpawn = useCallback((newItem) => {
-    setItems((prev) => [...prev, newItem]);
-  }, []);
-
   const handleCollect = useCallback((id, type) => {
-    setTimeout(() => {
-      setItems((prev) => prev.filter(item => item.id !== id));
+    setItems((prev) => prev.filter((item) => item.id !== id));
 
-      if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
-        window.navigator.vibrate(40);
-      }
-      
+    if (window.navigator?.vibrate) {
+      window.navigator.vibrate(35);
+    }
+
+    if (type === "fish") {
+      setFishCount((prev) => prev + 1);
+      setEnergy((prev) => Math.min(100, prev + 10));
+
       if (collectAudio.current) {
         collectAudio.current.currentTime = 0;
-        collectAudio.current.play().catch(e => console.log("Audio blocked:", e));
+        collectAudio.current.play().catch(() => {});
       }
+    }
 
-      if (type === 'fish') {
-        setHealth((h) => Math.min(100, h + 10)); 
-        setFishCount((f) => f + 1);
-      } else if (type === 'squid') {
-        setHealth((h) => Math.min(100, h + 20)); 
-        setSquidCount((s) => s + 1);
-      } else if (type === 'plastic') {
-        setHealth((h) => Math.max(0, h - 20));   
+    if (type === "squid") {
+      setSquidCount((prev) => prev + 1);
+      setEnergy((prev) => Math.min(100, prev + 20));
+
+      if (collectAudio.current) {
+        collectAudio.current.currentTime = 0;
+        collectAudio.current.play().catch(() => {});
       }
-    }, 0);
+    }
+
+    if (type === "plastic") {
+      setPlasticCount((prev) => prev + 1);
+      setEnergy((prev) => Math.max(0, prev - 20));
+
+      if (incorrectAudio.current) {
+        incorrectAudio.current.currentTime = 0;
+        incorrectAudio.current.play().catch(() => {});
+      }
+    }
   }, []);
 
   const handleMiss = useCallback((id) => {
-    setTimeout(() => {
-      setItems((prev) => prev.filter(item => item.id !== id));
-    }, 0);
+    setItems((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
-  const handlePlayAgain = () => {
-    window.location.reload();
+  const getResultTitle = () => {
+    if (energy <= 0) return "OUT OF ENERGY!";
+    return "TIME'S UP!";
   };
 
-  // 2. UPDATED DYNAMIC BATTERY MESSAGES
-  const getBatteryMessage = () => {
-    if (health >= 80) return "Incredible! ICY is completely full of energy! 🐧✨";
-    if (health >= 40) return "Good job! ICY safely navigated the waters. 🌊🐟";
-    if (health > 0) return "Phew! That was close. ICY is exhausted! 🔋📉";
-    return "Oh no! Too much plastic drained ICY's energy. 💔";
+  const getResultMessage = () => {
+    if (energy >= 80) return "Incredible! ICY is full of energy.";
+    if (energy >= 45) return "Good job! ICY safely collected enough food.";
+    if (energy > 0) return "That was close! ICY needs more food next time.";
+    return "Oh no! Too much plastic drained ICY's energy.";
   };
 
   return (
-    <div id="xr-overlay" style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: gameState === 'PLAYING' ? 'transparent' : '#0b1d3a' }}>
-      
-      {gameState === 'PLAYING' && (
-        <>
-          <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10, background: 'rgba(15, 23, 42, 0.75)', padding: '12px', borderRadius: '8px', color: '#fff', fontFamily: 'sans-serif' }}>
-            <div style={{ fontWeight: 'bold', fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>TARGET TRACKER</div>
-            <div style={{ color: '#4ade80' }}>Fish: {fishCount}</div>
-            <div style={{ color: '#c084fc' }}>Squid: {squidCount}</div>
-          </div>
-
-          <div style={{ position: 'absolute', top: '20px', right: '20px', zIndex: 10, background: 'rgba(15, 23, 42, 0.75)', padding: '12px 24px', borderRadius: '8px', textAlign: 'center', fontFamily: 'sans-serif' }}>
-            <div style={{ color: timeLeft <= 10 ? '#ef4444' : '#fff', fontSize: '24px', fontWeight: 'bold', marginBottom: '8px' }}>
-              0:{timeLeft.toString().padStart(2, '0')}
-            </div>
-            
-            <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px', textAlign: 'right' }}>ENERGY</div>
-            <div style={{ width: '120px', height: '14px', background: 'rgba(0,0,0,0.6)', borderRadius: '10px', overflow: 'hidden', border: '2px solid rgba(255,255,255,0.2)' }}>
-              <div style={{ 
-                width: `${health}%`, 
-                height: '100%', 
-                background: health > 30 ? '#4ade80' : '#ef4444',
-                transition: 'width 0.3s ease-out, background-color 0.3s ease'
-              }} />
-            </div>
-          </div>
-        </>
-      )}
-
-      {gameState === 'MENU' && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
-          <h1 style={{ fontSize: '36px', marginBottom: '8px', letterSpacing: '2px' }}>ICY AR</h1>
-          <p style={{ color: '#94a3b8', marginBottom: '20px' }}>An Augmented Reality Marine Experience</p>
-          
-          <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '15px 25px', borderRadius: '8px', marginBottom: '30px', fontSize: '14px', color: '#e2e8f0', maxWidth: '300px', lineHeight: '1.6', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <strong>How to Play:</strong><br />
-            Move your phone up, down, left, and right to steer the penguin. Catch fish and squid to fill your Energy Bar! Avoid red plastic hazards! You have 60 seconds.
-          </div>
-
-          <button onClick={initiateXRSession} style={{ background: '#2563eb', border: 'none', color: '#fff', padding: '14px 36px', fontSize: '16px', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' }}>
-            START AR GAME
-          </button>
-        </div>
-      )}
-
-      {gameState === 'GAMEOVER' && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
-          <h1 style={{ fontSize: '42px', marginBottom: '8px', color: health <= 0 ? '#ef4444' : '#f8fafc' }}>
-            {health <= 0 ? "OUT OF ENERGY!" : "TIME'S UP!"}
-          </h1>
-          
-          <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '24px 40px', borderRadius: '12px', margin: '20px 0 30px 0', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <div style={{ fontSize: '16px', color: '#94a3b8', marginBottom: '8px' }}>FINAL BATTERY LEVEL</div>
-            <div style={{ fontSize: '48px', fontWeight: 'bold', color: health > 30 ? '#4ade80' : '#ef4444', marginBottom: '10px' }}>{health}%</div>
-            
-            {/* Added Dynamic Text */}
-            <div style={{ fontSize: '15px', color: '#cbd5e1', fontStyle: 'italic', marginBottom: '16px' }}>
-              "{getBatteryMessage()}"
-            </div>
-            
-            <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', fontSize: '14px' }}>
-              <span style={{ color: '#4ade80' }}>Fish: {fishCount}</span>
-              <span style={{ color: '#c084fc' }}>Squid: {squidCount}</span>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '15px' }}>
-            <button onClick={handlePlayAgain} style={{ background: '#2563eb', border: 'none', color: '#fff', padding: '14px 30px', fontSize: '16px', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' }}>
-              PLAY AGAIN
-            </button>
-            <button onClick={() => setGameState('THANKYOU')} style={{ background: 'transparent', border: '2px solid #64748b', color: '#e2e8f0', padding: '14px 30px', fontSize: '16px', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer' }}>
-              EXIT GAME
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 3. UPDATED: THANK YOU SCREEN */}
-      {gameState === 'THANKYOU' && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 30, background: 'rgba(11, 29, 58, 1)', color: '#fff', fontFamily: 'sans-serif', padding: '30px', textAlign: 'center' }}>
-          <h1 style={{ fontSize: '48px', marginBottom: '15px', color: '#38bdf8' }}>Thank You!</h1>
-          <p style={{ fontSize: '18px', color: '#cbd5e1', maxWidth: '450px', lineHeight: '1.6', marginBottom: '40px' }}>
-            Thank you for playing ICY AR! Plastic pollution is incredibly deadly to marine life. By helping ICY safely avoid the plastic bottles, you did your part to keep our virtual oceans clean and safe.
-          </p>
-          <div style={{ width: '60px', height: '4px', background: '#38bdf8', borderRadius: '2px', opacity: 0.5 }}></div>
-        </div>
-      )}
-
-      <Canvas camera={{ position: [0, 1.5, 0], fov: 70 }} gl={{ alpha: true }}>
-        <XRManager session={xrSession} />
-        
-        {gameState === 'PLAYING' && (
-          <>
-            <Environment />
-            <PlayerPenguin />
-            <Bubbles />
-            
-            <Spawner onSpawn={handleSpawn} isActive={true} />
-            
-            {items.map((item) => (
-              <GameItem 
-                key={item.id} 
-                id={item.id}
-                type={item.type} 
-                startPos={item.pos} 
-                speed={item.speed}
-                onCollect={handleCollect}
-                onMiss={handleMiss}
-              />
-            ))}
-          </>
-        )}
+    <div className="app-shell">
+      <Canvas
+        camera={{ position: [0, 0, 4.2], fov: 62 }}
+        gl={{
+          alpha: false,
+          antialias: true,
+          powerPreference: "high-performance",
+        }}
+      >
+        <SceneContent
+          gameState={gameState}
+          tilt={tiltState}
+          items={items}
+          onCollect={handleCollect}
+          onMiss={handleMiss}
+          playerPositionRef={playerPositionRef}
+        />
       </Canvas>
+
+      {gameState === "PLAYING" && (
+        <div className="game-hud">
+          <div className="hud-card tracker-card">
+            <div className="hud-label">TARGET TRACKER</div>
+            <div className="hud-row fish">Fish: {fishCount}</div>
+            <div className="hud-row squid">Squid: {squidCount}</div>
+            <div className="hud-row plastic">Plastic: {plasticCount}</div>
+          </div>
+
+          <div className="hud-card timer-card">
+            <div className={`timer ${timeLeft <= 10 ? "danger" : ""}`}>
+              0:{String(timeLeft).padStart(2, "0")}
+            </div>
+
+            <div className="hud-label right">ENERGY</div>
+
+            <div className="energy-bar">
+              <div
+                className={`energy-fill ${energy <= 30 ? "low" : ""}`}
+                style={{ width: `${energy}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="move-helper">
+            Move your phone left, right, up and down to guide ICY.
+          </div>
+        </div>
+      )}
+
+      {gameState === "MENU" && (
+        <div className="screen-overlay">
+          <div className="menu-card">
+            <div className="small-pill">iOS / Safari PWA version</div>
+
+            <h1>ICY PLUNGE</h1>
+
+            <p className="subtitle">
+              Help the baby penguin swim underwater and collect food.
+            </p>
+
+            <div className="instruction-box">
+              <strong>How to play</strong>
+              <br />
+              Move your phone left, right, up, and down. ICY will follow your
+              movement. Catch fish and squid to gain energy. Avoid plastic.
+            </div>
+
+            {permissionMessage && (
+              <div className="permission-message">{permissionMessage}</div>
+            )}
+
+            <button className="primary-button" onClick={startGame}>
+              START GAME
+            </button>
+
+            <p className="support-note">
+              On iPhone, Safari will ask for motion permission. Press Allow.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {gameState === "GAMEOVER" && (
+        <div className="screen-overlay">
+          <div className="result-card">
+            <h1 className={energy <= 0 ? "danger-text" : ""}>
+              {getResultTitle()}
+            </h1>
+
+            <div className="final-box">
+              <div className="final-label">FINAL ENERGY LEVEL</div>
+              <div className={energy > 30 ? "final-score" : "final-score low"}>
+                {energy}%
+              </div>
+
+              <p className="result-message">“{getResultMessage()}”</p>
+
+              <div className="final-stats">
+                <span className="fish">Fish: {fishCount}</span>
+                <span className="squid">Squid: {squidCount}</span>
+                <span className="plastic">Plastic: {plasticCount}</span>
+              </div>
+            </div>
+
+            <div className="button-row">
+              <button className="primary-button" onClick={startGame}>
+                PLAY AGAIN
+              </button>
+
+              <button
+                className="secondary-button"
+                onClick={() => setGameState("THANKYOU")}
+              >
+                EXIT GAME
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {gameState === "THANKYOU" && (
+        <div className="screen-overlay solid">
+          <div className="thank-card">
+            <h1>Thank You!</h1>
+
+            <p>
+              Thank you for playing ICY Plunge. Plastic pollution is dangerous
+              for marine life. By helping ICY avoid plastic, you helped keep the
+              virtual ocean safe.
+            </p>
+
+            <button className="primary-button" onClick={() => setGameState("MENU")}>
+              BACK TO MENU
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
