@@ -596,7 +596,7 @@ function GameItem({ item, onCollect, onMiss }) {
           <NormalizedAnimatedModel
             modelPath="/models/fish.glb"
             type="fish"
-            targetSize={0.72}
+            targetSize={0.38}
           />
         )}
 
