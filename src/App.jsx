@@ -31,15 +31,17 @@ function shuffleArray(array) {
 
 function createBalancedItemType(itemBagRef) {
   if (!itemBagRef.current || itemBagRef.current.length === 0) {
-    // 8-object cycle:
-    // 3 fish, 2 krill, 1 squid, 2 plastic
+    // 10-object cycle:
+    // 4 fish, 2 squid, 2 krill, 2 plastic
     itemBagRef.current = shuffleArray([
       "fish",
       "fish",
       "fish",
-      "krill",
-      "krill",
+      "fish",
       "squid",
+      "squid",
+      "krill",
+      "krill",
       "plastic",
       "plastic",
     ]);
@@ -51,28 +53,30 @@ function createBalancedItemType(itemBagRef) {
 function createGameItem(camera, itemBagRef) {
   const type = createBalancedItemType(itemBagRef);
 
-  const yaw = Math.random() * Math.PI * 2;
-  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(55));
+  const forward = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
 
-  // Object starts visible, not too close and not too far
-  const distance = 5.8 + Math.random() * 1.4;
+  camera.getWorldDirection(forward);
+  right.crossVectors(forward, up).normalize();
 
-  const direction = new THREE.Vector3(
-    Math.sin(yaw) * Math.cos(pitch),
-    Math.sin(pitch),
-    -Math.cos(yaw) * Math.cos(pitch)
-  ).normalize();
+  // Spawn mostly inside the current view, so the user can clearly see it.
+  // It still feels 360 because the user can turn and new objects appear around the new direction.
+  const horizontalOffset = THREE.MathUtils.randFloatSpread(2.4);
+  const verticalOffset = THREE.MathUtils.randFloatSpread(1.6);
+  const distance = 4.2 + Math.random() * 1.1;
 
-  const position = camera.position.clone().add(direction.multiplyScalar(distance));
+  const position = camera.position
+    .clone()
+    .add(forward.clone().multiplyScalar(distance))
+    .add(right.clone().multiplyScalar(horizontalOffset))
+    .add(up.clone().multiplyScalar(verticalOffset));
 
   return {
     id: `${Date.now()}-${Math.random()}`,
     type,
     position: [position.x, position.y, position.z],
-
-    // Average speed: visible but not too slow
-    speed: type === "plastic" ? 1.45 : 1.6,
-
+    speed: type === "plastic" ? 1.65 : 1.85,
     spin: 0.65 + Math.random() * 0.8,
     bobOffset: Math.random() * Math.PI * 2,
   };
@@ -108,7 +112,7 @@ function UnderwaterBubbles() {
   const particles = useMemo(() => {
     const temp = [];
 
-    for (let i = 0; i < 230; i++) {
+    for (let i = 0; i < 250; i++) {
       temp.push({
         x: (Math.random() - 0.5) * 16,
         y: Math.random() * 9 - 4.5,
@@ -233,7 +237,7 @@ function UnderwaterEnvironment() {
 
   return (
     <group ref={group}>
-      <ambientLight intensity={1.35} color="#dff8ff" />
+      <ambientLight intensity={1.45} color="#dff8ff" />
       <directionalLight position={[2, 6, 4]} intensity={1.35} color="#e0f7ff" />
       <pointLight position={[0, 1.5, -2]} intensity={1.35} color="#38bdf8" />
 
@@ -284,8 +288,8 @@ function PlayerPenguin() {
 
     const targetPosition = camera.position
       .clone()
-      .add(forward.multiplyScalar(1.65))
-      .add(new THREE.Vector3(0, -0.35, 0));
+      .add(forward.multiplyScalar(1.35))
+      .add(new THREE.Vector3(0, -0.45, 0));
 
     group.current.position.lerp(targetPosition, delta * 8);
     group.current.lookAt(camera.position);
@@ -295,7 +299,7 @@ function PlayerPenguin() {
   return (
     <group ref={group}>
       <group rotation={[0, Math.PI / 2, 0]}>
-        <primitive object={clonedScene} scale={0.09} />
+        <primitive object={clonedScene} scale={0.08} />
       </group>
     </group>
   );
@@ -350,6 +354,7 @@ function StaticItemModel({ modelPath, scale }) {
 function GameItem({ item, onCollect, onMiss }) {
   const group = useRef();
   const glowRef = useRef();
+  const ringRef = useRef();
   const collectedRef = useRef(false);
   const visibleTimeRef = useRef(0);
   const { camera } = useThree();
@@ -362,10 +367,8 @@ function GameItem({ item, onCollect, onMiss }) {
 
     const directionToCamera = cameraPosition.clone().sub(itemPosition).normalize();
 
-    // Move object toward the user/penguin
     itemPosition.addScaledVector(directionToCamera, item.speed * delta);
 
-    // Floating underwater movement
     group.current.position.y +=
       Math.sin(state.clock.elapsedTime * 2.2 + item.bobOffset) * 0.003;
 
@@ -380,29 +383,33 @@ function GameItem({ item, onCollect, onMiss }) {
 
     group.current.lookAt(camera.position);
 
-    // Visibility glow when near the center target
+    const focusAmount = THREE.MathUtils.clamp((centerDot - 0.82) / 0.16, 0, 1);
+
     if (glowRef.current) {
-      const focusAmount = THREE.MathUtils.clamp((centerDot - 0.88) / 0.1, 0, 1);
-      const glowScale = 1 + focusAmount * 0.45;
+      const glowScale = 1.1 + focusAmount * 0.45;
       glowRef.current.scale.set(glowScale, glowScale, glowScale);
-      glowRef.current.material.opacity = 0.15 + focusAmount * 0.22;
+      glowRef.current.material.opacity = 0.16 + focusAmount * 0.22;
     }
 
-    // Object must be visible near center before catching
-    if (centerDot > 0.94 && distance < 2.8) {
+    if (ringRef.current) {
+      const ringScale = 1.1 + focusAmount * 0.35;
+      ringRef.current.scale.set(ringScale, ringScale, ringScale);
+      ringRef.current.material.opacity = 0.48 + focusAmount * 0.22;
+    }
+
+    if (centerDot > 0.925 && distance < 2.9) {
       visibleTimeRef.current += delta;
     } else {
       visibleTimeRef.current = 0;
     }
 
-    if (centerDot > 0.955 && distance < 2.55 && visibleTimeRef.current > 0.35) {
+    if (centerDot > 0.94 && distance < 2.55 && visibleTimeRef.current > 0.22) {
       collectedRef.current = true;
       onCollect(item.id, item.type);
       return;
     }
 
-    // If it gets too close without center focus, it passes/misses
-    if (distance < 0.18) {
+    if (distance < 0.12) {
       collectedRef.current = true;
       onMiss(item.id);
     }
@@ -419,43 +426,47 @@ function GameItem({ item, onCollect, onMiss }) {
 
   return (
     <group ref={group} position={item.position}>
-      <mesh ref={glowRef} position={[0, 0, -0.02]}>
-        <sphereGeometry args={[0.42, 24, 24]} />
+      <mesh ref={glowRef} position={[0, 0, -0.04]}>
+        <sphereGeometry args={[0.52, 24, 24]} />
         <meshBasicMaterial
           color={glowColor}
           transparent
-          opacity={0.18}
+          opacity={0.22}
           depthWrite={false}
+          depthTest={false}
           blending={THREE.AdditiveBlending}
         />
       </mesh>
 
-      <mesh position={[0, 0, -0.04]}>
-        <ringGeometry args={[0.34, 0.38, 32]} />
+      <mesh ref={ringRef} position={[0, 0, -0.06]}>
+        <ringGeometry args={[0.42, 0.47, 40]} />
         <meshBasicMaterial
           color={glowColor}
           transparent
-          opacity={0.45}
+          opacity={0.58}
           depthWrite={false}
+          depthTest={false}
           side={THREE.DoubleSide}
         />
       </mesh>
 
-      {item.type === "fish" && (
-        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.009} />
-      )}
+      <group position={[0, 0, 0.08]}>
+        {item.type === "fish" && (
+          <AnimatedItemModel modelPath="/models/fish.glb" scale={0.014} />
+        )}
 
-      {item.type === "squid" && (
-        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.032} />
-      )}
+        {item.type === "squid" && (
+          <AnimatedItemModel modelPath="/models/squid.glb" scale={0.042} />
+        )}
 
-      {item.type === "krill" && (
-        <AnimatedItemModel modelPath="/models/krill.glb" scale={0.024} />
-      )}
+        {item.type === "krill" && (
+          <AnimatedItemModel modelPath="/models/krill.glb" scale={0.036} />
+        )}
 
-      {item.type === "plastic" && (
-        <StaticItemModel modelPath="/models/plastic.glb" scale={0.028} />
-      )}
+        {item.type === "plastic" && (
+          <StaticItemModel modelPath="/models/plastic.glb" scale={0.04} />
+        )}
+      </group>
     </group>
   );
 }
@@ -479,7 +490,7 @@ function SceneContent({
         if (currentItem) return currentItem;
         return createGameItem(camera, itemBagRef);
       });
-    }, 450);
+    }, 250);
 
     return () => clearInterval(spawnTimer);
   }, [camera, gameState, setActiveItem, itemBagRef]);
@@ -623,8 +634,6 @@ export default function App() {
     const pitchDeg = THREE.MathUtils.clamp(beta - 60, -45, 45);
 
     viewRef.current.yaw = THREE.MathUtils.degToRad(yawDeg);
-
-    // Normal up/down direction
     viewRef.current.pitch = THREE.MathUtils.degToRad(pitchDeg * 0.75);
   }, []);
 
@@ -936,7 +945,7 @@ export default function App() {
           </div>
 
           <div className="move-helper">
-            Turn slowly to search the ocean. Keep the target on food. Avoid plastic.
+            Keep the target on the glowing food to collect energy. Avoid plastic.
           </div>
         </div>
       )}
@@ -955,9 +964,9 @@ export default function App() {
             <div className="instruction-box">
               <strong>How to play</strong>
               <br />
-              Allow camera and motion access. Slowly turn your phone around to
-              scan the ocean. Keep fish, squid, or krill near the center target
-              to collect energy. Avoid plastic because it drains ICY’s energy.
+              Allow camera and motion access. Slowly move your phone to scan
+              the ocean. Keep fish, squid, or krill inside the target circle to
+              collect energy. Avoid plastic because it drains ICY’s energy.
             </div>
 
             <div className="probability-box">
@@ -973,8 +982,8 @@ export default function App() {
             </button>
 
             <p className="support-note">
-              Tip: Turn your body slowly to search around you. If motion is
-              blocked, drag on the screen to look around.
+              Tip: Follow the glowing circle. If motion is blocked, drag on the
+              screen to look around.
             </p>
           </div>
         </div>
