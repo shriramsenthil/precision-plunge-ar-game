@@ -25,27 +25,35 @@ function cloneModel(scene) {
   return SkeletonUtils.clone(scene);
 }
 
-function createGameItem(camera) {
-  const rand = Math.random();
+function shuffleArray(array) {
+  return [...array].sort(() => Math.random() - 0.5);
+}
 
-  let type = "fish";
-
-  // Fish 40%, Squid 20%, Krill 20%, Plastic 20%
-  if (rand < 0.4) {
-    type = "fish";
-  } else if (rand < 0.6) {
-    type = "squid";
-  } else if (rand < 0.8) {
-    type = "krill";
-  } else {
-    type = "plastic";
+function createBalancedItemType(itemBagRef) {
+  if (!itemBagRef.current || itemBagRef.current.length === 0) {
+    itemBagRef.current = shuffleArray([
+      "fish",
+      "fish",
+      "fish",
+      "fish",
+      "squid",
+      "squid",
+      "krill",
+      "krill",
+      "plastic",
+      "plastic",
+    ]);
   }
 
-  // Spawn around the user in 360 degrees
-  const yaw = Math.random() * Math.PI * 2;
-  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(70));
+  return itemBagRef.current.pop();
+}
 
-  const distance = 6.5 + Math.random() * 2.5;
+function createGameItem(camera, itemBagRef) {
+  const type = createBalancedItemType(itemBagRef);
+
+  const yaw = Math.random() * Math.PI * 2;
+  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(65));
+  const distance = 6.2 + Math.random() * 2.2;
 
   const direction = new THREE.Vector3(
     Math.sin(yaw) * Math.cos(pitch),
@@ -59,7 +67,7 @@ function createGameItem(camera) {
     id: `${Date.now()}-${Math.random()}`,
     type,
     position: [position.x, position.y, position.z],
-    speed: type === "plastic" ? 0.8 : 0.92,
+    speed: type === "plastic" ? 1.05 : 1.15,
     spin: 0.55 + Math.random() * 0.7,
   };
 }
@@ -73,13 +81,13 @@ function CameraRig({ viewRef }) {
     camera.rotation.y = THREE.MathUtils.lerp(
       camera.rotation.y,
       viewRef.current.yaw,
-      delta * 4
+      delta * 5
     );
 
     camera.rotation.x = THREE.MathUtils.lerp(
       camera.rotation.x,
       viewRef.current.pitch,
-      delta * 4
+      delta * 5
     );
 
     camera.rotation.z = 0;
@@ -94,12 +102,12 @@ function UnderwaterBubbles() {
   const particles = useMemo(() => {
     const temp = [];
 
-    for (let i = 0; i < 180; i++) {
+    for (let i = 0; i < 230; i++) {
       temp.push({
-        x: (Math.random() - 0.5) * 14,
-        y: Math.random() * 8 - 4,
-        z: -Math.random() * 12 - 1,
-        speed: 0.22 + Math.random() * 0.55,
+        x: (Math.random() - 0.5) * 16,
+        y: Math.random() * 9 - 4.5,
+        z: -Math.random() * 14 - 1,
+        speed: 0.18 + Math.random() * 0.58,
       });
     }
 
@@ -118,10 +126,10 @@ function UnderwaterBubbles() {
     for (let i = 0; i < particles.length; i++) {
       array[i * 3 + 1] += particles[i].speed * delta;
 
-      if (array[i * 3 + 1] > 4.5) {
-        array[i * 3 + 1] = -4;
-        array[i * 3] = (Math.random() - 0.5) * 14;
-        array[i * 3 + 2] = -Math.random() * 12 - 1;
+      if (array[i * 3 + 1] > 4.7) {
+        array[i * 3 + 1] = -4.2;
+        array[i * 3] = (Math.random() - 0.5) * 16;
+        array[i * 3 + 2] = -Math.random() * 14 - 1;
       }
     }
 
@@ -141,12 +149,54 @@ function UnderwaterBubbles() {
 
       <pointsMaterial
         color="#ffffff"
-        size={0.045}
+        size={0.04}
         transparent
-        opacity={0.72}
+        opacity={0.68}
         depthWrite={false}
       />
     </points>
+  );
+}
+
+function WaterLightRays() {
+  return (
+    <group>
+      <mesh position={[-2.7, 1.4, -4.2]} rotation={[0.45, 0, -0.34]}>
+        <cylinderGeometry args={[0.08, 2.2, 8, 32]} />
+        <meshBasicMaterial
+          color="#e0f7ff"
+          transparent
+          opacity={0.06}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      <mesh position={[2.4, 1.6, -4.8]} rotation={[0.52, 0, 0.35]}>
+        <cylinderGeometry args={[0.08, 2.6, 8, 32]} />
+        <meshBasicMaterial
+          color="#e0f7ff"
+          transparent
+          opacity={0.055}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      <mesh position={[0.3, 2.1, -5.5]} rotation={[0.5, 0, 0.08]}>
+        <cylinderGeometry args={[0.1, 3.1, 8, 32]} />
+        <meshBasicMaterial
+          color="#bae6fd"
+          transparent
+          opacity={0.045}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+    </group>
   );
 }
 
@@ -168,7 +218,7 @@ function UnderwaterEnvironment() {
     clonedScene.traverse((child) => {
       if (child.isMesh && child.material) {
         child.material.transparent = true;
-        child.material.opacity = 0.34;
+        child.material.opacity = 0.42;
         child.castShadow = false;
         child.receiveShadow = false;
       }
@@ -177,54 +227,32 @@ function UnderwaterEnvironment() {
 
   return (
     <group ref={group}>
-      <ambientLight intensity={1.3} color="#dff8ff" />
-      <directionalLight position={[2, 6, 4]} intensity={1.4} color="#e0f7ff" />
-      <pointLight position={[0, 1.5, -2]} intensity={1.4} color="#38bdf8" />
+      <ambientLight intensity={1.35} color="#dff8ff" />
+      <directionalLight position={[2, 6, 4]} intensity={1.35} color="#e0f7ff" />
+      <pointLight position={[0, 1.5, -2]} intensity={1.35} color="#38bdf8" />
 
       <primitive
         object={clonedScene}
-        position={[0, -2.7, -5.5]}
-        scale={[1.15, 1.15, 1.15]}
+        position={[0, -2.65, -5.4]}
+        scale={[1.22, 1.22, 1.22]}
       />
 
-      <mesh position={[0, 0, -7.5]}>
-        <planeGeometry args={[18, 12]} />
-        <meshBasicMaterial color="#075985" transparent opacity={0.12} />
+      <mesh position={[0, 0, -7.6]}>
+        <planeGeometry args={[20, 13]} />
+        <meshBasicMaterial color="#075985" transparent opacity={0.09} />
       </mesh>
 
       <mesh position={[0, 3.5, -4]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[20, 20]} />
+        <planeGeometry args={[22, 22]} />
         <meshBasicMaterial
           color="#7dd3fc"
           transparent
-          opacity={0.12}
+          opacity={0.1}
           side={THREE.DoubleSide}
         />
       </mesh>
 
-      <mesh position={[-2.4, 1.2, -3.6]} rotation={[0.4, 0, -0.35]}>
-        <cylinderGeometry args={[0.1, 2.4, 8, 32]} />
-        <meshBasicMaterial
-          color="#e0f2fe"
-          transparent
-          opacity={0.07}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
-
-      <mesh position={[2.4, 1.4, -4.5]} rotation={[0.5, 0, 0.35]}>
-        <cylinderGeometry args={[0.1, 2.8, 8, 32]} />
-        <meshBasicMaterial
-          color="#e0f2fe"
-          transparent
-          opacity={0.06}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
+      <WaterLightRays />
     </group>
   );
 }
@@ -338,13 +366,13 @@ function GameItem({ item, onCollect, onMiss }) {
 
     group.current.lookAt(camera.position);
 
-    if (centerDot > 0.965 && distance < 2.15) {
+    if (centerDot > 0.96 && distance < 2.25) {
       collectedRef.current = true;
       onCollect(item.id, item.type);
       return;
     }
 
-    if (distance < 0.45) {
+    if (distance < 0.4) {
       collectedRef.current = true;
       onMiss(item.id);
     }
@@ -353,15 +381,15 @@ function GameItem({ item, onCollect, onMiss }) {
   return (
     <group ref={group} position={item.position}>
       {item.type === "fish" && (
-        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.006} />
+        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.005} />
       )}
 
       {item.type === "squid" && (
-        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.028} />
+        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.026} />
       )}
 
       {item.type === "krill" && (
-        <AnimatedItemModel modelPath="/models/krill.glb" scale={0.018} />
+        <AnimatedItemModel modelPath="/models/krill.glb" scale={0.016} />
       )}
 
       {item.type === "plastic" && (
@@ -378,6 +406,7 @@ function SceneContent({
   onMiss,
   viewRef,
   setActiveItem,
+  itemBagRef,
 }) {
   const { camera } = useThree();
 
@@ -387,18 +416,18 @@ function SceneContent({
     const spawnTimer = setInterval(() => {
       setActiveItem((currentItem) => {
         if (currentItem) return currentItem;
-        return createGameItem(camera);
+        return createGameItem(camera, itemBagRef);
       });
-    }, 950);
+    }, 650);
 
     return () => clearInterval(spawnTimer);
-  }, [camera, gameState, setActiveItem]);
+  }, [camera, gameState, setActiveItem, itemBagRef]);
 
   return (
     <>
       <CameraRig viewRef={viewRef} />
 
-      <fog attach="fog" args={["#0f6f9e", 3, 11]} />
+      <fog attach="fog" args={["#0f6f9e", 2.8, 11]} />
 
       <UnderwaterEnvironment />
       <UnderwaterBubbles />
@@ -437,6 +466,7 @@ export default function App() {
 
   const videoRef = useRef(null);
   const mediaStreamRef = useRef(null);
+  const itemBagRef = useRef([]);
 
   const viewRef = useRef({
     yaw: 0,
@@ -454,13 +484,13 @@ export default function App() {
   useEffect(() => {
     ambienceAudio.current = new Audio("/audios/antarctic_ambience.mp3");
     ambienceAudio.current.loop = true;
-    ambienceAudio.current.volume = 0.28;
+    ambienceAudio.current.volume = 0.3;
 
     collectAudio.current = new Audio("/audios/fish_collect.mp3");
     collectAudio.current.volume = 0.8;
 
     incorrectAudio.current = new Audio("/audios/incorrect.mp3");
-    incorrectAudio.current.volume = 0.9;
+    incorrectAudio.current.volume = 0.95;
 
     babyPenguinAudio.current = new Audio("/audios/baby_penguin.mp3");
     babyPenguinAudio.current.volume = 0.95;
@@ -531,7 +561,8 @@ export default function App() {
 
     const pitchDeg = THREE.MathUtils.clamp(beta - 60, -45, 45);
 
-    viewRef.current.yaw = THREE.MathUtils.degToRad(-yawDeg);
+    // Fixed mirror issue: do not invert yaw.
+    viewRef.current.yaw = THREE.MathUtils.degToRad(yawDeg);
     viewRef.current.pitch = THREE.MathUtils.degToRad(-pitchDeg * 0.75);
   }, []);
 
@@ -590,7 +621,7 @@ export default function App() {
       const deltaX = touch.clientX - lastTouchRef.current.x;
       const deltaY = touch.clientY - lastTouchRef.current.y;
 
-      viewRef.current.yaw -= deltaX * 0.006;
+      viewRef.current.yaw += deltaX * 0.006;
       viewRef.current.pitch -= deltaY * 0.006;
 
       viewRef.current.pitch = THREE.MathUtils.clamp(
@@ -609,7 +640,7 @@ export default function App() {
       if (gameState !== "PLAYING") return;
       if (event.buttons !== 1) return;
 
-      viewRef.current.yaw -= event.movementX * 0.005;
+      viewRef.current.yaw += event.movementX * 0.005;
       viewRef.current.pitch -= event.movementY * 0.005;
 
       viewRef.current.pitch = THREE.MathUtils.clamp(
@@ -669,6 +700,7 @@ export default function App() {
     setPermissionMessage("");
     viewRef.current = { yaw: 0, pitch: 0 };
     orientationBaseRef.current = null;
+    itemBagRef.current = [];
   };
 
   const warmUpAudio = async () => {
@@ -725,31 +757,19 @@ export default function App() {
     if (type === "fish") {
       setFishCount((prev) => prev + 1);
       setEnergy((prev) => Math.min(100, prev + 10));
-
-      if (collectAudio.current) {
-        collectAudio.current.currentTime = 0;
-        collectAudio.current.play().catch(() => {});
-      }
+      collectAudio.current?.play().catch(() => {});
     }
 
     if (type === "squid") {
       setSquidCount((prev) => prev + 1);
       setEnergy((prev) => Math.min(100, prev + 15));
-
-      if (collectAudio.current) {
-        collectAudio.current.currentTime = 0;
-        collectAudio.current.play().catch(() => {});
-      }
+      collectAudio.current?.play().catch(() => {});
     }
 
     if (type === "krill") {
       setKrillCount((prev) => prev + 1);
       setEnergy((prev) => Math.min(100, prev + 12));
-
-      if (collectAudio.current) {
-        collectAudio.current.currentTime = 0;
-        collectAudio.current.play().catch(() => {});
-      }
+      collectAudio.current?.play().catch(() => {});
     }
 
     if (type === "plastic") {
@@ -789,6 +809,8 @@ export default function App() {
       <div className={`camera-fallback ${cameraReady ? "hidden" : ""}`} />
 
       <div className="water-tint" />
+      <div className="caustic-layer" />
+      <div className="depth-vignette" />
 
       <Canvas
         className="game-canvas"
@@ -806,6 +828,7 @@ export default function App() {
           onMiss={handleMiss}
           viewRef={viewRef}
           setActiveItem={setActiveItem}
+          itemBagRef={itemBagRef}
         />
       </Canvas>
 
@@ -839,7 +862,7 @@ export default function App() {
           </div>
 
           <div className="move-helper">
-            Turn around slowly. Keep the target on food to collect energy. Avoid plastic.
+            Turn slowly to search the ocean. Keep the target on food. Avoid plastic.
           </div>
         </div>
       )}
