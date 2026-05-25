@@ -31,7 +31,7 @@ function shuffleArray(array) {
 
 function createBalancedItemType(itemBagRef) {
   if (!itemBagRef.current || itemBagRef.current.length === 0) {
-    // 8-object cycle for 60 seconds:
+    // 8-object cycle:
     // 3 fish, 2 krill, 1 squid, 2 plastic
     itemBagRef.current = shuffleArray([
       "fish",
@@ -52,8 +52,10 @@ function createGameItem(camera, itemBagRef) {
   const type = createBalancedItemType(itemBagRef);
 
   const yaw = Math.random() * Math.PI * 2;
-  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(60));
-  const distance = 5.2 + Math.random() * 1.5;
+  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(55));
+
+  // Object starts visible, not too close and not too far
+  const distance = 5.8 + Math.random() * 1.4;
 
   const direction = new THREE.Vector3(
     Math.sin(yaw) * Math.cos(pitch),
@@ -68,10 +70,11 @@ function createGameItem(camera, itemBagRef) {
     type,
     position: [position.x, position.y, position.z],
 
-    // Faster object movement toward ICY
-    speed: type === "plastic" ? 1.85 : 2.05,
+    // Average speed: visible but not too slow
+    speed: type === "plastic" ? 1.45 : 1.6,
 
-    spin: 0.75 + Math.random() * 0.9,
+    spin: 0.65 + Math.random() * 0.8,
+    bobOffset: Math.random() * Math.PI * 2,
   };
 }
 
@@ -346,17 +349,25 @@ function StaticItemModel({ modelPath, scale }) {
 
 function GameItem({ item, onCollect, onMiss }) {
   const group = useRef();
+  const glowRef = useRef();
   const collectedRef = useRef(false);
+  const visibleTimeRef = useRef(0);
   const { camera } = useThree();
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!group.current || collectedRef.current) return;
 
     const itemPosition = group.current.position;
     const cameraPosition = camera.position.clone();
 
     const directionToCamera = cameraPosition.clone().sub(itemPosition).normalize();
+
+    // Move object toward the user/penguin
     itemPosition.addScaledVector(directionToCamera, item.speed * delta);
+
+    // Floating underwater movement
+    group.current.position.y +=
+      Math.sin(state.clock.elapsedTime * 2.2 + item.bobOffset) * 0.003;
 
     group.current.rotation.y += item.spin * delta;
 
@@ -369,34 +380,81 @@ function GameItem({ item, onCollect, onMiss }) {
 
     group.current.lookAt(camera.position);
 
-    if (centerDot > 0.93 && distance < 2.75) {
+    // Visibility glow when near the center target
+    if (glowRef.current) {
+      const focusAmount = THREE.MathUtils.clamp((centerDot - 0.88) / 0.1, 0, 1);
+      const glowScale = 1 + focusAmount * 0.45;
+      glowRef.current.scale.set(glowScale, glowScale, glowScale);
+      glowRef.current.material.opacity = 0.15 + focusAmount * 0.22;
+    }
+
+    // Object must be visible near center before catching
+    if (centerDot > 0.94 && distance < 2.8) {
+      visibleTimeRef.current += delta;
+    } else {
+      visibleTimeRef.current = 0;
+    }
+
+    if (centerDot > 0.955 && distance < 2.55 && visibleTimeRef.current > 0.35) {
       collectedRef.current = true;
       onCollect(item.id, item.type);
       return;
     }
 
-    if (distance < 0.25) {
+    // If it gets too close without center focus, it passes/misses
+    if (distance < 0.18) {
       collectedRef.current = true;
       onMiss(item.id);
     }
   });
 
+  const glowColor =
+    item.type === "plastic"
+      ? "#fb7185"
+      : item.type === "squid"
+      ? "#a78bfa"
+      : item.type === "krill"
+      ? "#c084fc"
+      : "#4ade80";
+
   return (
     <group ref={group} position={item.position}>
+      <mesh ref={glowRef} position={[0, 0, -0.02]}>
+        <sphereGeometry args={[0.42, 24, 24]} />
+        <meshBasicMaterial
+          color={glowColor}
+          transparent
+          opacity={0.18}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      <mesh position={[0, 0, -0.04]}>
+        <ringGeometry args={[0.34, 0.38, 32]} />
+        <meshBasicMaterial
+          color={glowColor}
+          transparent
+          opacity={0.45}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
       {item.type === "fish" && (
-        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.005} />
+        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.009} />
       )}
 
       {item.type === "squid" && (
-        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.026} />
+        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.032} />
       )}
 
       {item.type === "krill" && (
-        <AnimatedItemModel modelPath="/models/krill.glb" scale={0.016} />
+        <AnimatedItemModel modelPath="/models/krill.glb" scale={0.024} />
       )}
 
       {item.type === "plastic" && (
-        <StaticItemModel modelPath="/models/plastic.glb" scale={0.022} />
+        <StaticItemModel modelPath="/models/plastic.glb" scale={0.028} />
       )}
     </group>
   );
@@ -421,7 +479,7 @@ function SceneContent({
         if (currentItem) return currentItem;
         return createGameItem(camera, itemBagRef);
       });
-    }, 300);
+    }, 450);
 
     return () => clearInterval(spawnTimer);
   }, [camera, gameState, setActiveItem, itemBagRef]);
@@ -564,8 +622,9 @@ export default function App() {
 
     const pitchDeg = THREE.MathUtils.clamp(beta - 60, -45, 45);
 
-    // Fixed mirror issue: do not invert yaw.
     viewRef.current.yaw = THREE.MathUtils.degToRad(yawDeg);
+
+    // Normal up/down direction
     viewRef.current.pitch = THREE.MathUtils.degToRad(pitchDeg * 0.75);
   }, []);
 
@@ -625,7 +684,7 @@ export default function App() {
       const deltaY = touch.clientY - lastTouchRef.current.y;
 
       viewRef.current.yaw += deltaX * 0.006;
-      viewRef.current.pitch -= deltaY * 0.006;
+      viewRef.current.pitch += deltaY * 0.006;
 
       viewRef.current.pitch = THREE.MathUtils.clamp(
         viewRef.current.pitch,
@@ -760,19 +819,31 @@ export default function App() {
     if (type === "fish") {
       setFishCount((prev) => prev + 1);
       setEnergy((prev) => Math.min(100, prev + 10));
-      collectAudio.current?.play().catch(() => {});
+
+      if (collectAudio.current) {
+        collectAudio.current.currentTime = 0;
+        collectAudio.current.play().catch(() => {});
+      }
     }
 
     if (type === "squid") {
       setSquidCount((prev) => prev + 1);
       setEnergy((prev) => Math.min(100, prev + 15));
-      collectAudio.current?.play().catch(() => {});
+
+      if (collectAudio.current) {
+        collectAudio.current.currentTime = 0;
+        collectAudio.current.play().catch(() => {});
+      }
     }
 
     if (type === "krill") {
       setKrillCount((prev) => prev + 1);
       setEnergy((prev) => Math.min(100, prev + 12));
-      collectAudio.current?.play().catch(() => {});
+
+      if (collectAudio.current) {
+        collectAudio.current.currentTime = 0;
+        collectAudio.current.play().catch(() => {});
+      }
     }
 
     if (type === "plastic") {
