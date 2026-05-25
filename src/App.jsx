@@ -20,22 +20,6 @@ useGLTF.preload("/models/plastic.glb");
 const GAME_TIME = 60;
 const START_ENERGY = 50;
 
-function useIsIOS() {
-  const [isIOS, setIsIOS] = useState(false);
-
-  useEffect(() => {
-    const ua = window.navigator.userAgent || "";
-    const platform = window.navigator.platform || "";
-    const iOS =
-      /iPad|iPhone|iPod/.test(ua) ||
-      (platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
-
-    setIsIOS(iOS);
-  }, []);
-
-  return isIOS;
-}
-
 function cloneModel(scene) {
   return SkeletonUtils.clone(scene);
 }
@@ -232,7 +216,10 @@ function PlayerPenguin({ tilt }) {
 function AnimatedItemModel({ modelPath, scale }) {
   const { scene, animations } = useGLTF(modelPath);
   const clonedScene = useMemo(() => cloneModel(scene), [scene]);
-  const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
+  const mixer = useMemo(
+    () => new THREE.AnimationMixer(clonedScene),
+    [clonedScene]
+  );
 
   useEffect(() => {
     if (animations?.length) {
@@ -283,7 +270,6 @@ function GameItem({ item, playerPositionRef, onCollect, onMiss }) {
 
     const playerPos = playerPositionRef.current;
     const itemPos = group.current.position;
-
     const distance = itemPos.distanceTo(playerPos);
 
     if (distance < item.hitRadius) {
@@ -357,8 +343,6 @@ function SceneContent({
 }
 
 export default function App() {
-  const isIOS = useIsIOS();
-
   const [gameState, setGameState] = useState("MENU");
   const [items, setItems] = useState([]);
   const [energy, setEnergy] = useState(START_ENERGY);
@@ -422,27 +406,37 @@ export default function App() {
     setPermissionMessage("");
 
     try {
-      if (
-        typeof DeviceOrientationEvent !== "undefined" &&
-        typeof DeviceOrientationEvent.requestPermission === "function"
-      ) {
-        const result = await DeviceOrientationEvent.requestPermission();
+      const DeviceOrientation =
+        typeof window !== "undefined"
+          ? window.DeviceOrientationEvent
+          : undefined;
 
-        if (result !== "granted") {
-          setPermissionMessage(
-            "Motion permission was blocked. Please allow Motion & Orientation access in Safari settings, then try again."
-          );
-          return false;
+      if (
+        DeviceOrientation &&
+        typeof DeviceOrientation.requestPermission === "function"
+      ) {
+        const permission = await DeviceOrientation.requestPermission();
+
+        if (permission === "granted") {
+          window.addEventListener("deviceorientation", handleOrientation, true);
+          return true;
         }
+
+        setPermissionMessage(
+          "Motion permission was not allowed. You can still play by dragging on the screen."
+        );
+        return false;
       }
 
       window.addEventListener("deviceorientation", handleOrientation, true);
       return true;
     } catch (error) {
       console.error("Motion permission error:", error);
+
       setPermissionMessage(
-        "Motion permission failed. You can still test on desktop using mouse movement."
+        "Motion permission failed. You can still play by dragging on the screen."
       );
+
       return false;
     }
   };
@@ -468,14 +462,34 @@ export default function App() {
   }, [gameState]);
 
   useEffect(() => {
+    const handleTouchMove = (event) => {
+      if (gameState !== "PLAYING") return;
+      if (!event.touches || event.touches.length === 0) return;
+
+      const touch = event.touches[0];
+
+      const x = (touch.clientX / window.innerWidth - 0.5) * 2;
+      const y = (touch.clientY / window.innerHeight - 0.5) * 2;
+
+      tiltRef.current = {
+        x: THREE.MathUtils.clamp(x, -1, 1),
+        y: THREE.MathUtils.clamp(y, -1, 1),
+      };
+    };
+
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+
+    return () => {
+      window.removeEventListener("touchmove", handleTouchMove);
+    };
+  }, [gameState]);
+
+  useEffect(() => {
     if (gameState !== "PLAYING") return;
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
-        if (prev <= 1) {
-          return 0;
-        }
-
+        if (prev <= 1) return 0;
         return prev - 1;
       });
     }, 1000);
@@ -574,20 +588,22 @@ export default function App() {
   const startGame = async () => {
     resetGame();
 
-    await warmUpAudio();
+    // This must happen directly from the button click for iPhone Safari.
+    await requestMotionPermission();
 
-    const motionReady = await requestMotionPermission();
-
-    if (!motionReady && isIOS) {
-      return;
-    }
-
+    // Start game even if motion permission fails.
+    // User can still play by dragging on the screen.
     setGameState("PLAYING");
 
-    if (ambienceAudio.current) {
-      ambienceAudio.current.currentTime = 0;
-      ambienceAudio.current.play().catch(() => {});
-    }
+    // Audio starts after permission request.
+    setTimeout(() => {
+      warmUpAudio();
+
+      if (ambienceAudio.current) {
+        ambienceAudio.current.currentTime = 0;
+        ambienceAudio.current.play().catch(() => {});
+      }
+    }, 100);
   };
 
   const handleCollect = useCallback((id, type) => {
@@ -689,7 +705,7 @@ export default function App() {
           </div>
 
           <div className="move-helper">
-            Move your phone left, right, up and down to guide ICY.
+            Move your phone or drag your finger to guide ICY.
           </div>
         </div>
       )}
@@ -708,8 +724,9 @@ export default function App() {
             <div className="instruction-box">
               <strong>How to play</strong>
               <br />
-              Move your phone left, right, up, and down. ICY will follow your
-              movement. Catch fish and squid to gain energy. Avoid plastic.
+              Move your phone left, right, up, and down. If motion is blocked,
+              drag on the screen to guide ICY. Catch fish and squid to gain
+              energy. Avoid plastic.
             </div>
 
             {permissionMessage && (
@@ -721,7 +738,8 @@ export default function App() {
             </button>
 
             <p className="support-note">
-              On iPhone, Safari will ask for motion permission. Press Allow.
+              On iPhone, press Allow for motion permission. If it is blocked,
+              drag on the screen to play.
             </p>
           </div>
         </div>
@@ -736,6 +754,7 @@ export default function App() {
 
             <div className="final-box">
               <div className="final-label">FINAL ENERGY LEVEL</div>
+
               <div className={energy > 30 ? "final-score" : "final-score low"}>
                 {energy}%
               </div>
@@ -776,7 +795,10 @@ export default function App() {
               virtual ocean safe.
             </p>
 
-            <button className="primary-button" onClick={() => setGameState("MENU")}>
+            <button
+              className="primary-button"
+              onClick={() => setGameState("MENU")}
+            >
               BACK TO MENU
             </button>
           </div>
