@@ -11,11 +11,12 @@ import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import "./App.css";
 
-useGLTF.preload("/models/penguin.glb");
-useGLTF.preload("/models/seabed.glb");
 useGLTF.preload("/models/fish.glb");
+useGLTF.preload("/models/seabed.glb");
 useGLTF.preload("/models/squid.glb");
+useGLTF.preload("/models/krill.glb");
 useGLTF.preload("/models/plastic.glb");
+useGLTF.preload("/models/penguin.glb");
 
 const GAME_TIME = 60;
 const START_ENERGY = 50;
@@ -29,61 +30,37 @@ function createGameItem(camera) {
 
   let type = "fish";
 
-  if (rand < 0.55) {
+  // Fish 40%, Squid 20%, Krill 20%, Plastic 20%
+  if (rand < 0.4) {
     type = "fish";
-  } else if (rand < 0.85) {
+  } else if (rand < 0.6) {
+    type = "squid";
+  } else if (rand < 0.8) {
     type = "krill";
   } else {
     type = "plastic";
   }
 
-  const forward = new THREE.Vector3();
-  const right = new THREE.Vector3();
-  const up = new THREE.Vector3(0, 1, 0);
+  // Spawn around the user in 360 degrees
+  const yaw = Math.random() * Math.PI * 2;
+  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(70));
 
-  camera.getWorldDirection(forward);
-  right.crossVectors(forward, up).normalize();
+  const distance = 6.5 + Math.random() * 2.5;
 
-  const directionOptions = ["front", "left", "right", "top", "bottom"];
-  const directionType =
-    directionOptions[Math.floor(Math.random() * directionOptions.length)];
+  const direction = new THREE.Vector3(
+    Math.sin(yaw) * Math.cos(pitch),
+    Math.sin(pitch),
+    -Math.cos(yaw) * Math.cos(pitch)
+  ).normalize();
 
-  let direction = new THREE.Vector3();
-
-  if (directionType === "front") {
-    direction.copy(forward);
-  }
-
-  if (directionType === "left") {
-    direction.copy(forward).multiplyScalar(0.5).add(right.clone().multiplyScalar(-1));
-  }
-
-  if (directionType === "right") {
-    direction.copy(forward).multiplyScalar(0.5).add(right.clone().multiplyScalar(1));
-  }
-
-  if (directionType === "top") {
-    direction.copy(forward).multiplyScalar(0.65).add(new THREE.Vector3(0, 1, 0));
-  }
-
-  if (directionType === "bottom") {
-    direction.copy(forward).multiplyScalar(0.65).add(new THREE.Vector3(0, -1, 0));
-  }
-
-  direction.x += (Math.random() - 0.5) * 0.35;
-  direction.y += (Math.random() - 0.5) * 0.25;
-  direction.z += (Math.random() - 0.5) * 0.35;
-  direction.normalize();
-
-  const distance = 6.5 + Math.random() * 2.2;
   const position = camera.position.clone().add(direction.multiplyScalar(distance));
 
   return {
     id: `${Date.now()}-${Math.random()}`,
     type,
     position: [position.x, position.y, position.z],
-    speed: type === "plastic" ? 0.85 : 0.95,
-    spin: 0.7 + Math.random() * 0.8,
+    speed: type === "plastic" ? 0.8 : 0.92,
+    spin: 0.55 + Math.random() * 0.7,
   };
 }
 
@@ -191,7 +168,7 @@ function UnderwaterEnvironment() {
     clonedScene.traverse((child) => {
       if (child.isMesh && child.material) {
         child.material.transparent = true;
-        child.material.opacity = 0.18;
+        child.material.opacity = 0.34;
         child.castShadow = false;
         child.receiveShadow = false;
       }
@@ -269,11 +246,7 @@ function PlayerPenguin() {
     if (!group.current) return;
 
     const forward = new THREE.Vector3();
-    const right = new THREE.Vector3();
-    const up = new THREE.Vector3(0, 1, 0);
-
     camera.getWorldDirection(forward);
-    right.crossVectors(forward, up).normalize();
 
     const targetPosition = camera.position
       .clone()
@@ -380,15 +353,19 @@ function GameItem({ item, onCollect, onMiss }) {
   return (
     <group ref={group} position={item.position}>
       {item.type === "fish" && (
-        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.018} />
+        <AnimatedItemModel modelPath="/models/fish.glb" scale={0.006} />
+      )}
+
+      {item.type === "squid" && (
+        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.028} />
       )}
 
       {item.type === "krill" && (
-        <AnimatedItemModel modelPath="/models/squid.glb" scale={0.038} />
+        <AnimatedItemModel modelPath="/models/krill.glb" scale={0.018} />
       )}
 
       {item.type === "plastic" && (
-        <StaticItemModel modelPath="/models/plastic.glb" scale={0.028} />
+        <StaticItemModel modelPath="/models/plastic.glb" scale={0.022} />
       )}
     </group>
   );
@@ -450,6 +427,7 @@ export default function App() {
 
   const [energy, setEnergy] = useState(START_ENERGY);
   const [fishCount, setFishCount] = useState(0);
+  const [squidCount, setSquidCount] = useState(0);
   const [krillCount, setKrillCount] = useState(0);
   const [plasticCount, setPlasticCount] = useState(0);
   const [timeLeft, setTimeLeft] = useState(GAME_TIME);
@@ -503,7 +481,7 @@ export default function App() {
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         setPermissionMessage(
-          "Camera is not available on this browser. The game will still run with a water background."
+          "Camera is not available on this browser. The game will still run with an ocean background."
         );
         return false;
       }
@@ -532,7 +510,7 @@ export default function App() {
       console.error("Camera error:", error);
       setCameraReady(false);
       setPermissionMessage(
-        "Camera permission was blocked. The game will still work, but it will not show the live camera background."
+        "Camera permission was blocked. The game will still work with an ocean background."
       );
       return false;
     }
@@ -684,6 +662,7 @@ export default function App() {
     setActiveItem(null);
     setEnergy(START_ENERGY);
     setFishCount(0);
+    setSquidCount(0);
     setKrillCount(0);
     setPlasticCount(0);
     setTimeLeft(GAME_TIME);
@@ -753,9 +732,19 @@ export default function App() {
       }
     }
 
+    if (type === "squid") {
+      setSquidCount((prev) => prev + 1);
+      setEnergy((prev) => Math.min(100, prev + 15));
+
+      if (collectAudio.current) {
+        collectAudio.current.currentTime = 0;
+        collectAudio.current.play().catch(() => {});
+      }
+    }
+
     if (type === "krill") {
       setKrillCount((prev) => prev + 1);
-      setEnergy((prev) => Math.min(100, prev + 18));
+      setEnergy((prev) => Math.min(100, prev + 12));
 
       if (collectAudio.current) {
         collectAudio.current.currentTime = 0;
@@ -829,6 +818,7 @@ export default function App() {
           <div className="hud-card tracker-card">
             <div className="hud-label">TARGET TRACKER</div>
             <div className="hud-row fish">Fish: {fishCount}</div>
+            <div className="hud-row squid">Squid: {squidCount}</div>
             <div className="hud-row krill">Krill: {krillCount}</div>
             <div className="hud-row plastic">Plastic: {plasticCount}</div>
           </div>
@@ -849,7 +839,7 @@ export default function App() {
           </div>
 
           <div className="move-helper">
-            Look around 360° and keep the food near the center to catch it.
+            Turn around slowly. Keep the target on food to collect energy. Avoid plastic.
           </div>
         </div>
       )}
@@ -857,24 +847,24 @@ export default function App() {
       {gameState === "MENU" && (
         <div className="screen-overlay">
           <div className="menu-card">
-            <div className="small-pill">Fake AR Safari PWA version</div>
+            <div className="small-pill">Safari AR Experience</div>
 
             <h1>ICY PLUNGE</h1>
 
             <p className="subtitle">
-              Camera background + 360° underwater catching game.
+              Explore the ocean around you and help ICY collect food.
             </p>
 
             <div className="instruction-box">
               <strong>How to play</strong>
               <br />
-              Allow camera and motion access. Move your phone around to look in
-              360°. Keep fish or krill near the center to catch them. Avoid
-              plastic because it reduces energy.
+              Allow camera and motion access. Slowly turn your phone around to
+              scan the ocean. Keep fish, squid, or krill near the center target
+              to collect energy. Avoid plastic because it drains ICY’s energy.
             </div>
 
             <div className="probability-box">
-              Fish 55% · Krill 30% · Plastic 15%
+              Fish 40% · Squid 20% · Krill 20% · Plastic 20%
             </div>
 
             {permissionMessage && (
@@ -882,12 +872,12 @@ export default function App() {
             )}
 
             <button className="primary-button" onClick={startGame}>
-              START FAKE AR GAME
+              START AR EXPERIENCE
             </button>
 
             <p className="support-note">
-              On iPhone Safari, this is a camera-overlay fake AR game. If motion
-              is blocked, drag on the screen to look around.
+              Tip: Turn your body slowly to search around you. If motion is
+              blocked, drag on the screen to look around.
             </p>
           </div>
         </div>
@@ -911,6 +901,7 @@ export default function App() {
 
               <div className="final-stats">
                 <span className="fish">Fish: {fishCount}</span>
+                <span className="squid">Squid: {squidCount}</span>
                 <span className="krill">Krill: {krillCount}</span>
                 <span className="plastic">Plastic: {plasticCount}</span>
               </div>
