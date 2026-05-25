@@ -53,30 +53,28 @@ function createBalancedItemType(itemBagRef) {
 function createGameItem(camera, itemBagRef) {
   const type = createBalancedItemType(itemBagRef);
 
-  const forward = new THREE.Vector3();
-  const right = new THREE.Vector3();
-  const up = new THREE.Vector3(0, 1, 0);
+  // True 360-degree spawn around the user
+  const yaw = Math.random() * Math.PI * 2;
+  const pitch = THREE.MathUtils.degToRad(THREE.MathUtils.randFloatSpread(50));
 
-  camera.getWorldDirection(forward);
-  right.crossVectors(forward, up).normalize();
+  const distance = 4.8 + Math.random() * 1.4;
 
-  // Spawn mostly inside the current view, so the user can clearly see it.
-  // It still feels 360 because the user can turn and new objects appear around the new direction.
-  const horizontalOffset = THREE.MathUtils.randFloatSpread(2.4);
-  const verticalOffset = THREE.MathUtils.randFloatSpread(1.6);
-  const distance = 4.2 + Math.random() * 1.1;
+  const direction = new THREE.Vector3(
+    Math.sin(yaw) * Math.cos(pitch),
+    Math.sin(pitch),
+    -Math.cos(yaw) * Math.cos(pitch)
+  ).normalize();
 
-  const position = camera.position
-    .clone()
-    .add(forward.clone().multiplyScalar(distance))
-    .add(right.clone().multiplyScalar(horizontalOffset))
-    .add(up.clone().multiplyScalar(verticalOffset));
+  const position = camera.position.clone().add(direction.multiplyScalar(distance));
 
   return {
     id: `${Date.now()}-${Math.random()}`,
     type,
     position: [position.x, position.y, position.z],
-    speed: type === "plastic" ? 1.65 : 1.85,
+
+    // Medium-fast speed, not too slow and not sudden
+    speed: type === "plastic" ? 1.7 : 1.9,
+
     spin: 0.65 + Math.random() * 0.8,
     bobOffset: Math.random() * Math.PI * 2,
   };
@@ -337,6 +335,18 @@ function StaticItemModel({ modelPath, scale }) {
   const clonedScene = useMemo(() => cloneModel(scene), [scene]);
   const group = useRef();
 
+  useEffect(() => {
+    clonedScene.traverse((child) => {
+      child.renderOrder = 20;
+
+      if (child.isMesh && child.material) {
+        child.material.depthTest = false;
+        child.material.depthWrite = false;
+        child.material.needsUpdate = true;
+      }
+    });
+  }, [clonedScene]);
+
   useFrame((_, delta) => {
     if (!group.current) return;
 
@@ -386,24 +396,25 @@ function GameItem({ item, onCollect, onMiss }) {
     const focusAmount = THREE.MathUtils.clamp((centerDot - 0.82) / 0.16, 0, 1);
 
     if (glowRef.current) {
-      const glowScale = 1.1 + focusAmount * 0.45;
+      const glowScale = 0.9 + focusAmount * 0.35;
       glowRef.current.scale.set(glowScale, glowScale, glowScale);
-      glowRef.current.material.opacity = 0.16 + focusAmount * 0.22;
+      glowRef.current.material.opacity = 0.08 + focusAmount * 0.12;
     }
 
     if (ringRef.current) {
-      const ringScale = 1.1 + focusAmount * 0.35;
+      const ringScale = 0.9 + focusAmount * 0.25;
       ringRef.current.scale.set(ringScale, ringScale, ringScale);
-      ringRef.current.material.opacity = 0.48 + focusAmount * 0.22;
+      ringRef.current.material.opacity = 0.28 + focusAmount * 0.18;
     }
 
+    // Catch only when object is visible near center
     if (centerDot > 0.925 && distance < 2.9) {
       visibleTimeRef.current += delta;
     } else {
       visibleTimeRef.current = 0;
     }
 
-    if (centerDot > 0.94 && distance < 2.55 && visibleTimeRef.current > 0.22) {
+    if (centerDot > 0.94 && distance < 2.55 && visibleTimeRef.current > 0.2) {
       collectedRef.current = true;
       onCollect(item.id, item.type);
       return;
@@ -426,45 +437,48 @@ function GameItem({ item, onCollect, onMiss }) {
 
   return (
     <group ref={group} position={item.position}>
-      <mesh ref={glowRef} position={[0, 0, -0.04]}>
-        <sphereGeometry args={[0.52, 24, 24]} />
+      {/* Smaller, softer glow behind object */}
+      <mesh ref={glowRef} position={[0, 0, -0.18]} renderOrder={1}>
+        <sphereGeometry args={[0.42, 24, 24]} />
         <meshBasicMaterial
           color={glowColor}
           transparent
-          opacity={0.22}
+          opacity={0.12}
           depthWrite={false}
           depthTest={false}
           blending={THREE.AdditiveBlending}
         />
       </mesh>
 
-      <mesh ref={ringRef} position={[0, 0, -0.06]}>
-        <ringGeometry args={[0.42, 0.47, 40]} />
+      {/* Smaller ring, does not hide the object */}
+      <mesh ref={ringRef} position={[0, 0, -0.2]} renderOrder={2}>
+        <ringGeometry args={[0.32, 0.36, 40]} />
         <meshBasicMaterial
           color={glowColor}
           transparent
-          opacity={0.58}
+          opacity={0.25}
           depthWrite={false}
           depthTest={false}
           side={THREE.DoubleSide}
         />
       </mesh>
 
-      <group position={[0, 0, 0.08]}>
+      {/* Object is placed in front of the ring */}
+      <group position={[0, 0, 0.18]} renderOrder={20}>
         {item.type === "fish" && (
-          <AnimatedItemModel modelPath="/models/fish.glb" scale={0.014} />
+          <AnimatedItemModel modelPath="/models/fish.glb" scale={0.018} />
         )}
 
         {item.type === "squid" && (
-          <AnimatedItemModel modelPath="/models/squid.glb" scale={0.042} />
+          <AnimatedItemModel modelPath="/models/squid.glb" scale={0.052} />
         )}
 
         {item.type === "krill" && (
-          <AnimatedItemModel modelPath="/models/krill.glb" scale={0.036} />
+          <AnimatedItemModel modelPath="/models/krill.glb" scale={0.045} />
         )}
 
         {item.type === "plastic" && (
-          <StaticItemModel modelPath="/models/plastic.glb" scale={0.04} />
+          <StaticItemModel modelPath="/models/plastic.glb" scale={0.048} />
         )}
       </group>
     </group>
@@ -490,7 +504,7 @@ function SceneContent({
         if (currentItem) return currentItem;
         return createGameItem(camera, itemBagRef);
       });
-    }, 250);
+    }, 290);
 
     return () => clearInterval(spawnTimer);
   }, [camera, gameState, setActiveItem, itemBagRef]);
